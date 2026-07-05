@@ -3,8 +3,49 @@ from sqlalchemy.orm import Session
 from typing import List
 import models, schemas, crud
 from database import get_db
+from print_service import service
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
+
+
+def _build_print_data(order: models.Order) -> dict:
+    """把订单模型转成打印模板所需的数据结构。
+
+    - 单价/小计保留两位小数（模板里再格式化）；
+    - 合计取整（与前端页面显示一致）。
+    - 数量为整数时去掉小数尾巴，显示更干净。
+    """
+    def fmt_qty(q):
+        f = float(q)
+        return int(f) if f == int(f) else round(f, 2)
+
+    items = []
+    total = 0.0
+    for i, it in enumerate(order.items, start=1):
+        price = float(it.price)
+        qty = float(it.qty)
+        subtotal = price * qty
+        total += subtotal
+        items.append({
+            "index": i,
+            "product_name": it.product_name,
+            "spec": it.spec or "",
+            "qty": fmt_qty(qty),
+            "price": price,
+            "subtotal": subtotal,
+        })
+
+    created = order.created_at
+    created_str = created.strftime("%Y-%m-%d %H:%M") if created else ""
+
+    return {
+        "brand_name": order.brand_name,
+        "customer": order.customer,
+        "order_id": order.id,
+        "created_at": created_str,
+        "items": items,
+        "total": round(total),
+    }
 
 
 @router.get("/", response_model=List[schemas.OrderOut])
@@ -52,8 +93,21 @@ def update_order(order_id: int, data: schemas.OrderUpdate, db: Session = Depends
 
 
 @router.post("/{order_id}/print", response_model=schemas.OrderOut)
-def mark_printed(order_id: int, db: Session = Depends(get_db)):
-    obj = crud.mark_printed(db, order_id)
-    if not obj:
+def print_order(order_id: int, db: Session = Depends(get_db)):
+    """静默打印订单：渲染 → 打印机出纸，成功后才标记已打印。
+
+    打印服务异常（未装 SumatraPDF / 打印机离线等）返回 502，前端提示，
+    订单状态保持不变，可重试。
+    """
+    order = crud.get_order(db, order_id)
+    if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
+
+    data = _build_print_data(order)
+    try:
+        service.submit("delivery_a5", data)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"打印失败：{e}")
+
+    crud.mark_printed(db, order_id)
     return crud.get_order(db, order_id)

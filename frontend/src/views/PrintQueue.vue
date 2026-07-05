@@ -125,11 +125,11 @@ const saving      = ref(false)
 const printingOrder = ref(null)
 
 const editTotal = computed(() =>
-  editItems.value.reduce((s, i) => s + i.qty * i.price, 0).toFixed(2)
+  editItems.value.reduce((s, i) => s + i.qty * i.price, 0).toFixed(0)
 )
 
 function orderTotal(order) {
-  return order.items.reduce((s, i) => s + Number(i.qty) * Number(i.price), 0).toFixed(2)
+  return Math.round(order.items.reduce((s, i) => s + Number(i.qty) * Number(i.price), 0))
 }
 
 function formatDate(dt) {

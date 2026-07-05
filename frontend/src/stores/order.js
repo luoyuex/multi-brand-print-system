@@ -33,11 +33,13 @@ export const useOrderStore = defineStore('order', () => {
   }, { deep: true })
 
   function addItem(product, qty = 1) {
-    const existing = items.value.find((i) => i.product_code === product.code)
-    if (existing) {
+    const existingIdx = items.value.findIndex((i) => i.product_code === product.code)
+    if (existingIdx !== -1) {
+      const [existing] = items.value.splice(existingIdx, 1)
       existing.qty += qty
+      items.value.unshift(existing)
     } else {
-      items.value.push({
+      items.value.unshift({
         product_code: product.code,
         product_name: product.name,
         spec:         product.spec,

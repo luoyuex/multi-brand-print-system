@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from database import engine, Base
-from routers import brands, products, orders, stores
+from routers import brands, products, orders, stores, print as print_router
 
 # 建表（首次启动自动建表）
 Base.metadata.create_all(bind=engine)
@@ -47,6 +47,13 @@ app.include_router(brands.router)
 app.include_router(stores.router)
 app.include_router(products.router)
 app.include_router(orders.router)
+app.include_router(print_router.router)
+
+
+@app.on_event("shutdown")
+def _shutdown_print_service():
+    from print_service import service
+    service.shutdown()
 
 
 @app.get("/")

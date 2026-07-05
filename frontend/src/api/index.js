@@ -35,9 +35,17 @@ export const productApi = {
 }
 
 export const orderApi = {
-  list:        ()           => http.get('/orders/'),
-  get:         (id)         => http.get(`/orders/${id}`),
-  create:      (data)       => http.post('/orders/', data),
-  update:      (id, data)   => http.put(`/orders/${id}`, data),
-  markPrinted: (id)         => http.post(`/orders/${id}/print`),
+  list:   ()         => http.get('/orders/'),
+  get:    (id)       => http.get(`/orders/${id}`),
+  create: (data)     => http.post('/orders/', data),
+  update: (id, data) => http.put(`/orders/${id}`, data),
+  // 触发后端静默打印：成功出纸后订单才标记为已打印
+  print:  (id)       => http.post(`/orders/${id}/print`),
+}
+
+export const printApi = {
+  printers:     ()        => http.get('/print/printers'),
+  getConfig:    ()        => http.get('/print/config'),
+  updateConfig: (data)    => http.put('/print/config', data),
+  test:         (printer) => http.post('/print/test', { printer }),
 }
