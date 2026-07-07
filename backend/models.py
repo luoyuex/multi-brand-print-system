@@ -70,5 +70,6 @@ class OrderItem(Base):
     qty = Column(Numeric(10, 2), nullable=False)
     price = Column(Numeric(10, 2), nullable=False)
     manual_price = Column(Boolean, default=False)
+    is_replacement = Column(Boolean, default=False)   # 补货（东西坏了免费补发，单价小计为 0）
 
     order = relationship("Order", back_populates="items")

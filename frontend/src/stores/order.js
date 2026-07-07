@@ -17,7 +17,7 @@ export const useOrderStore = defineStore('order', () => {
 
   const storeId  = ref(draft?.storeId  ?? null)
   const brandId  = ref(draft?.brandId  ?? null)   // 同步品牌，供 OrderEntry 恢复
-  const items    = ref(draft?.items    ?? [])      // { product_code, product_name, spec, qty, price, manual_price }
+  const items    = ref(draft?.items    ?? [])      // { product_code, product_name, spec, qty, price, manual_price, is_replacement }
 
   const total = computed(() =>
     items.value.reduce((sum, item) => sum + item.qty * item.price, 0)
@@ -40,12 +40,13 @@ export const useOrderStore = defineStore('order', () => {
       items.value.unshift(existing)
     } else {
       items.value.unshift({
-        product_code: product.code,
-        product_name: product.name,
-        spec:         product.spec,
+        product_code:  product.code,
+        product_name:  product.name,
+        spec:          product.spec,
         qty,
-        price:        product.price,
-        manual_price: false,
+        price:         product.price,
+        manual_price:  false,
+        is_replacement: false,
       })
     }
   }
@@ -56,6 +57,22 @@ export const useOrderStore = defineStore('order', () => {
       items.value[index].manual_price = true
     } else {
       items.value[index][field] = value
+    }
+  }
+
+  // 切换「补货」：坏损免费补发，单价强制 0；取消时恢复原价
+  function toggleReplacement(index) {
+    const item = items.value[index]
+    if (!item.is_replacement) {
+      // 标记为补货：记住当前原价，价格归 0
+      item.orig_price   = item.price
+      item.price        = 0
+      item.is_replacement = true
+    } else {
+      // 取消补货：恢复原价
+      item.price        = item.orig_price ?? 0
+      item.is_replacement = false
+      delete item.orig_price
     }
   }
 
@@ -70,5 +87,5 @@ export const useOrderStore = defineStore('order', () => {
     localStorage.removeItem(DRAFT_KEY)
   }
 
-  return { storeId, brandId, items, total, addItem, updateItem, removeItem, clear }
+  return { storeId, brandId, items, total, addItem, updateItem, toggleReplacement, removeItem, clear }
 })

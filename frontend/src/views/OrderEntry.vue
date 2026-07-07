@@ -102,7 +102,12 @@
       <el-table v-if="!isMobile" :data="orderStore.items" border stripe style="width:100%;">
         <el-table-column type="index" label="#" width="48" />
         <el-table-column prop="product_code" label="序号" width="72" />
-        <el-table-column prop="product_name" label="品名" min-width="120" />
+        <el-table-column label="品名" min-width="120">
+          <template #default="{ row }">
+            <span>{{ row.product_name }}</span>
+            <el-tag v-if="row.is_replacement" type="warning" size="small" effect="dark" style="margin-left:6px;">补</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="spec" label="规格" width="72" />
         <el-table-column label="数量" width="118">
           <template #default="{ row, $index }">
@@ -124,16 +129,26 @@
               :precision="2"
               size="small"
               style="width:100%;"
+              :disabled="row.is_replacement"
               :class="row.manual_price ? 'manual-price' : ''"
               @change="(v) => orderStore.updateItem($index, 'price', v)"
             />
           </template>
         </el-table-column>
         <el-table-column label="小计" width="96">
-          <template #default="{ row }">¥{{ (row.qty * row.price).toFixed(2) }}</template>
+          <template #default="{ row }">
+            <span v-if="row.is_replacement" class="replacement-sub">补发</span>
+            <span v-else>¥{{ (row.qty * row.price).toFixed(2) }}</span>
+          </template>
         </el-table-column>
-        <el-table-column label="操作" width="72">
-          <template #default="{ $index }">
+        <el-table-column label="操作" width="128">
+          <template #default="{ row, $index }">
+            <el-button
+              :type="row.is_replacement ? 'warning' : 'default'"
+              size="small"
+              :plain="!row.is_replacement"
+              @click="orderStore.toggleReplacement($index)"
+            >补</el-button>
             <el-button type="danger" size="small" circle @click="orderStore.removeItem($index)">
               <el-icon><Delete /></el-icon>
             </el-button>
@@ -150,6 +165,7 @@
         >
           <div class="item-header">
             <span class="item-name">{{ item.product_name }}</span>
+            <el-tag v-if="item.is_replacement" type="warning" size="small" effect="dark" class="rep-tag">补</el-tag>
             <span class="item-spec">{{ item.spec }}</span>
             <button class="item-delete" @click="orderStore.removeItem(index)">
               <el-icon><Delete /></el-icon>
@@ -173,11 +189,24 @@
                 :min="0"
                 :precision="2"
                 size="small"
+                :disabled="item.is_replacement"
                 :class="item.manual_price ? 'manual-price' : ''"
                 @change="(v) => orderStore.updateItem(index, 'price', v)"
               />
             </div>
-            <div class="item-subtotal">¥{{ (item.qty * item.price).toFixed(2) }}</div>
+            <div class="item-subtotal">
+              <span v-if="item.is_replacement" class="replacement-sub">补发</span>
+              <span v-else>¥{{ (item.qty * item.price).toFixed(2) }}</span>
+            </div>
+          </div>
+          <div class="item-actions">
+            <el-button
+              :type="item.is_replacement ? 'warning' : 'default'"
+              size="small"
+              :plain="!item.is_replacement"
+              style="width:100%;"
+              @click="orderStore.toggleReplacement(index)"
+            >{{ item.is_replacement ? '取消补货' : '标记补货（坏损补发）' }}</el-button>
           </div>
         </div>
 
@@ -380,6 +409,11 @@ async function submitOrder() {
 .item-field { display: flex; align-items: center; gap: 6px; }
 .field-label { font-size: 12px; color: #606266; white-space: nowrap; }
 .item-subtotal { margin-left: auto; font-weight: 700; color: var(--color-primary); font-size: 15px; }
+
+/* 补货标记 */
+.rep-tag { flex-shrink: 0; margin-left: 6px; }
+.replacement-sub { color: var(--color-warning); font-weight: 700; }
+.item-actions { margin-top: 10px; }
 
 /* ── 移动端底部操作栏 ──────────────────────── */
 .mobile-action-bar {

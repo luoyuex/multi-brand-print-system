@@ -22,8 +22,10 @@ def _build_print_data(order: models.Order) -> dict:
     items = []
     total = 0.0
     for i, it in enumerate(order.items, start=1):
-        price = float(it.price)
+        is_replacement = bool(it.is_replacement)
         qty = float(it.qty)
+        # 补货行免费补发：单价/小计强制为 0，不计入合计
+        price = 0.0 if is_replacement else float(it.price)
         subtotal = price * qty
         total += subtotal
         items.append({
@@ -33,6 +35,7 @@ def _build_print_data(order: models.Order) -> dict:
             "qty": fmt_qty(qty),
             "price": price,
             "subtotal": subtotal,
+            "is_replacement": is_replacement,
         })
 
     created = order.created_at

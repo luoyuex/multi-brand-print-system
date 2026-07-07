@@ -78,6 +78,20 @@
     .total-label { text-align: right; }
     .total-value { text-align: right; font-size: 14px; }
 
+    /* 补货行：品名后的「补」标签 + 单价/小计的补发标记 */
+    .tag-rep {
+      display: inline-block;
+      margin-left: 4px;
+      padding: 0 4px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      background: #000;
+      border-radius: 3px;
+      vertical-align: middle;
+    }
+    .rep { color: #000; font-weight: 700; }
+
     .footer {
       margin-top: 14px;
       display: flex;
@@ -118,11 +132,16 @@
       {% for item in items %}
       <tr>
         <td class="col-idx">{{ item.index }}</td>
-        <td class="col-name">{{ item.product_name }}</td>
+        <td class="col-name">{{ item.product_name }}{% if item.is_replacement %}<span class="tag-rep">补</span>{% endif %}</td>
         <td class="col-spec">{{ item.spec or '' }}</td>
         <td class="col-qty">{{ item.qty }}</td>
+        {% if item.is_replacement %}
+        <td class="col-price rep">补发</td>
+        <td class="col-sub rep">0.00</td>
+        {% else %}
         <td class="col-price">{{ '%.2f' | format(item.price) }}</td>
         <td class="col-sub">{{ '%.2f' | format(item.subtotal) }}</td>
+        {% endif %}
       </tr>
       {% endfor %}
     </tbody>

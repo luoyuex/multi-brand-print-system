@@ -15,7 +15,10 @@ def _run_migrations():
             ("store_id",   "ALTER TABLE orders ADD COLUMN store_id INT"),
             ("status",     "ALTER TABLE orders ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'pending'"),
             ("printed_at", "ALTER TABLE orders ADD COLUMN printed_at DATETIME"),
-        ]
+        ],
+        "order_items": [
+            ("is_replacement", "ALTER TABLE order_items ADD COLUMN is_replacement TINYINT(1) NOT NULL DEFAULT 0"),
+        ],
     }
     with engine.connect() as conn:
         for table, cols in migrations.items():

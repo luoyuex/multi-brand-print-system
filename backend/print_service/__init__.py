@@ -6,7 +6,3 @@
 - printer  枚举系统打印机 + 调 SumatraPDF 静默打印 PDF
 - service  串行打印队列，编排 渲染 → 打印，供路由调用
 """
-
-from .service import print_service
-
-__all__ = ["print_service"]

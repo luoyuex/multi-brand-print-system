@@ -21,7 +21,7 @@
             <el-tag :type="order.status === 'printed' ? 'success' : 'warning'" size="small" class="status-tag">
               {{ order.status === 'printed' ? '已打印' : '暂存' }}
             </el-tag>
-            <el-button size="small" type="primary" plain @click="handlePrint(order)">🖨️ 打印</el-button>
+            <el-button size="small" type="primary" plain :loading="printingId === order.id" @click="handlePrint(order)">🖨️ 打印</el-button>
             <el-button size="small" @click="toggleEdit(order)">
               {{ editingId === order.id ? '取消' : '编辑' }}
             </el-button>
@@ -38,11 +38,16 @@
               </thead>
               <tbody>
                 <tr v-for="item in order.items" :key="item.id">
-                  <td>{{ item.product_name }}</td>
+                  <td>
+                    {{ item.product_name }}
+                    <el-tag v-if="item.is_replacement" type="warning" size="small" effect="dark" class="rep-tag">补</el-tag>
+                  </td>
                   <td>{{ item.spec || '—' }}</td>
                   <td>{{ item.qty }}</td>
-                  <td>¥{{ Number(item.price).toFixed(2) }}</td>
-                  <td>¥{{ (item.qty * item.price).toFixed(2) }}</td>
+                  <td v-if="item.is_replacement" class="rep-cell">补发</td>
+                  <td v-else>¥{{ Number(item.price).toFixed(2) }}</td>
+                  <td v-if="item.is_replacement" class="rep-cell">补发</td>
+                  <td v-else>¥{{ (item.qty * item.price).toFixed(2) }}</td>
                 </tr>
               </tbody>
               <tfoot>
@@ -57,7 +62,10 @@
           <!-- 编辑模式 -->
           <template v-else>
             <div v-for="(item, idx) in editItems" :key="idx" class="edit-row">
-              <span class="edit-name">{{ item.product_name }}</span>
+              <span class="edit-name">
+                {{ item.product_name }}
+                <el-tag v-if="item.is_replacement" type="warning" size="small" effect="dark" class="rep-tag">补</el-tag>
+              </span>
               <span class="edit-spec">{{ item.spec }}</span>
               <el-input-number v-model="item.qty"   :min="0.01" :precision="2" size="small" style="width:110px;" />
               <el-input-number v-model="item.price" :min="0"    :precision="2" size="small" style="width:110px;" />
@@ -74,44 +82,11 @@
         </div>
       </div>
     </el-card>
-
-    <!-- ── 打印区域（仅打印媒体显示）── -->
-    <div id="print-area">
-      <template v-if="printingOrder">
-        <div class="print-header">
-          <h2>{{ printingOrder.brand_name }}</h2>
-          <p>客户：{{ printingOrder.customer }}</p>
-          <p>日期：{{ formatDate(printingOrder.created_at) }}</p>
-          <p>单号：#{{ printingOrder.id }}</p>
-        </div>
-        <table class="print-table">
-          <thead>
-            <tr><th>#</th><th>品名</th><th>规格</th><th>数量</th><th>单价</th><th>小计</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="(item, i) in printingOrder.items" :key="i">
-              <td>{{ i + 1 }}</td>
-              <td>{{ item.product_name }}</td>
-              <td>{{ item.spec || '' }}</td>
-              <td>{{ item.qty }}</td>
-              <td>¥{{ Number(item.price).toFixed(2) }}</td>
-              <td>¥{{ (item.qty * item.price).toFixed(2) }}</td>
-            </tr>
-          </tbody>
-          <tfoot>
-            <tr>
-              <td colspan="5" style="text-align:right;font-weight:700;padding:6px 8px;">合计</td>
-              <td style="font-weight:700;padding:6px 8px;">¥{{ orderTotal(printingOrder) }}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </template>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import { orderApi } from '../api'
@@ -122,14 +97,18 @@ const expandedIds = ref(new Set())
 const editingId   = ref(null)
 const editItems   = ref([])
 const saving      = ref(false)
-const printingOrder = ref(null)
+const printingId  = ref(null)
 
 const editTotal = computed(() =>
-  editItems.value.reduce((s, i) => s + i.qty * i.price, 0).toFixed(0)
+  editItems.value
+    .reduce((s, i) => s + (i.is_replacement ? 0 : i.qty * i.price), 0)
+    .toFixed(0)
 )
 
 function orderTotal(order) {
-  return Math.round(order.items.reduce((s, i) => s + Number(i.qty) * Number(i.price), 0))
+  return Math.round(
+    order.items.reduce((s, i) => s + (i.is_replacement ? 0 : Number(i.qty) * Number(i.price)), 0)
+  )
 }
 
 function formatDate(dt) {
@@ -192,31 +171,24 @@ async function saveEdit(orderId) {
   }
 }
 
-// 打印逻辑
-function handlePrint(order) {
-  printingOrder.value = order
-  // 等待 DOM 更新后触发打印
-  setTimeout(() => window.print(), 100)
-}
-
-function onAfterPrint() {
-  if (!printingOrder.value) return
-  const orderId = printingOrder.value.id
-  printingOrder.value = null
-  // 标记已打印（无论用户是否真的打印了纸质版）
-  orderApi.markPrinted(orderId).then((updated) => {
-    const idx = orders.value.findIndex((o) => o.id === orderId)
+// 打印逻辑：调后端静默打印（主机 Playwright 渲染 PDF → SumatraPDF 出纸），
+// 成功出纸后后端才把订单标记为已打印。
+async function handlePrint(order) {
+  printingId.value = order.id
+  try {
+    const updated = await orderApi.print(order.id)
+    const idx = orders.value.findIndex((o) => o.id === order.id)
     if (idx !== -1) orders.value[idx] = updated
-  }).catch(() => {})
+    ElMessage.success('已发送打印')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    printingId.value = null
+  }
 }
 
 onMounted(() => {
   loadOrders()
-  window.addEventListener('afterprint', onAfterPrint)
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('afterprint', onAfterPrint)
 })
 </script>
 
@@ -286,6 +258,10 @@ onBeforeUnmount(() => {
 .total-label { text-align: right; font-weight: 700; }
 .total-value { font-weight: 700; color: var(--color-primary); }
 
+/* 补货标记 */
+.rep-tag { margin-left: 6px; }
+.rep-cell { color: var(--color-warning); font-weight: 700; }
+
 /* ── 编辑行 ── */
 .edit-row {
   display: flex;
@@ -324,36 +300,4 @@ onBeforeUnmount(() => {
   margin-top: 10px;
 }
 .edit-total { font-weight: 700; color: var(--color-primary); }
-
-/* ── 打印区域（屏幕上隐藏）── */
-#print-area { display: none; }
-
-@media print {
-  /* 隐藏页面所有其他内容 */
-  body > * { display: none !important; }
-  /* 只显示打印区域 */
-  #print-area {
-    display: block !important;
-    position: fixed;
-    top: 0; left: 0;
-    width: 100%;
-    font-family: Arial, sans-serif;
-  }
-
-  .print-header { margin-bottom: 16px; }
-  .print-header h2 { font-size: 20px; margin: 0 0 6px; }
-  .print-header p  { margin: 2px 0; font-size: 13px; }
-
-  .print-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-  }
-  .print-table th,
-  .print-table td {
-    border: 1px solid #999;
-    padding: 5px 8px;
-  }
-  .print-table thead th { background: #eee; }
-}
 </style>

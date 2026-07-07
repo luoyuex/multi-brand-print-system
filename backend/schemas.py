@@ -69,6 +69,7 @@ class OrderItemIn(BaseModel):
     qty: float
     price: float
     manual_price: bool = False
+    is_replacement: bool = False   # 补货行：坏损补发，单价/小计为 0
 
 class OrderItemOut(OrderItemIn):
     id: int
