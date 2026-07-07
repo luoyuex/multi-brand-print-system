@@ -1,13 +1,14 @@
-"""模板渲染：Jinja2 填充 HTML → Playwright(Chromium) 转 PDF。
+"""模板渲染：Jinja2 填充 HTML → Chromium 命令行转 PDF。
 
-- render_html(): 把订单数据注入 HTML 模板，返回 HTML 字符串。
-- html_to_pdf(): 用 headless Chromium 把 HTML 渲染成 PDF 文件（A4/A5）。
-
-Playwright 的浏览器实例较重，这里在进程内复用单例，避免每次打印都冷启动。
+不使用 Playwright Python API（它在 asyncio 事件循环线程上会抛 NotImplementedError），
+而是直接调用 Chromium 可执行文件的 --print-to-pdf 参数生成 PDF，
+完全绕开 asyncio 兼容性问题。
 """
 
+import os
+import subprocess
+import sys
 from pathlib import Path
-from threading import Lock
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -18,68 +19,92 @@ _env = Environment(
     autoescape=select_autoescape(["html", "xml"]),
 )
 
-# Playwright 单例（懒加载）
-_pw = None
-_browser = None
-_pw_lock = Lock()
+def _find_chromium() -> str:
+    """动态查找 Chromium 可执行文件路径。"""
+    # 1. 环境变量指定
+    env_path = os.environ.get("CHROMIUM_PATH", "")
+    if env_path and os.path.isfile(env_path):
+        return env_path
+    # 2. Playwright 安装目录
+    pw_dir = Path.home() / "AppData" / "Local" / "ms-playwright"
+    if pw_dir.exists():
+        for d in sorted(pw_dir.glob("chromium-*")):
+            chrome = d / "chrome-win" / "chrome.exe"
+            if chrome.is_file():
+                return str(chrome)
+    return ""
 
 
 def render_html(template: str, data: dict) -> str:
-    """渲染模板为 HTML 字符串。
-
-    template: 模板名（不含扩展名），如 'delivery_a5'。
-    data: 注入变量（brand_name, customer, order_id, created_at, items, total, paper）。
-    """
+    """渲染模板为 HTML 字符串。"""
     tpl = _env.get_template(f"{template}.html")
     return tpl.render(**data)
 
 
-def _ensure_browser():
-    """懒加载并复用 Chromium 实例。"""
-    global _pw, _browser
-    if _browser is not None and _browser.is_connected():
-        return _browser
-    with _pw_lock:
-        if _browser is not None and _browser.is_connected():
-            return _browser
-        from playwright.sync_api import sync_playwright
-        _pw = sync_playwright().start()
-        _browser = _pw.chromium.launch(args=["--no-sandbox"])
-        return _browser
-
-
-def html_to_pdf(html: str, out_path: str, paper: str = "A5") -> str:
+def html_to_pdf(html: str, out_path: str, paper: str = "241x140") -> str:
     """把 HTML 渲染成 PDF 写到 out_path，返回该路径。
 
-    纸张大小由 CSS @page 控制，这里 prefer_css_page_size=True 让其生效。
+    直接调用 Chromium --print-to-pdf，不依赖 Playwright Python API，
+    彻底避免 asyncio 事件循环兼容性问题。
     """
-    browser = _ensure_browser()
-    page = browser.new_page()
+    # 1. 写 HTML 到临时文件（Chromium 需要文件路径或 URL）
+    import tempfile
+    fd, html_path = tempfile.mkstemp(suffix=".html", prefix="print_")
+    os.close(fd)
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html)
+
     try:
-        page.set_content(html, wait_until="networkidle")
-        page.pdf(
-            path=out_path,
-            prefer_css_page_size=True,   # 用模板里 @page 的尺寸
-            print_background=True,
+        # 2. 调 Chromium 生成 PDF
+        chrome = _find_chromium()
+        if not chrome:
+            raise RuntimeError(
+                "Chromium 未找到。请运行: playwright install chromium"
+            )
+
+        cmd = [
+            chrome,
+            "--headless",
+            "--disable-gpu",
+            "--no-sandbox",
+            f"--print-to-pdf={out_path}",
+            "--print-to-pdf-no-header",     # 不加 Chrome 默认页眉页脚
+            html_path,
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=30,
+            creationflags=_no_window_flag(),
         )
+        # Chromium headless 返回码 0 表示成功
+        if not os.path.isfile(out_path):
+            raise RuntimeError(
+                f"Chromium PDF 生成失败 (code {result.returncode}): "
+                f"{result.stderr.decode('gbk', errors='replace')[:300] if result.stderr else '无输出'}"
+            )
     finally:
-        page.close()
+        try:
+            os.remove(html_path)
+        except OSError:
+            pass
+
     return out_path
 
 
+def ensure_initialized():
+    """兼容接口：Chromium 命令行模式无需预初始化，此函数为空操作。"""
+    pass
+
+
 def shutdown():
-    """关闭 Playwright（应用退出时调用）。"""
-    global _pw, _browser
-    with _pw_lock:
-        if _browser is not None:
-            try:
-                _browser.close()
-            except Exception:
-                pass
-            _browser = None
-        if _pw is not None:
-            try:
-                _pw.stop()
-            except Exception:
-                pass
-            _pw = None
+    """兼容接口：Chromium 命令行模式无需关闭，此函数为空操作。"""
+    pass
+
+
+def _no_window_flag() -> int:
+    """Windows 下避免弹出子进程控制台窗口。"""
+    if sys.platform == "win32":
+        return getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    return 0

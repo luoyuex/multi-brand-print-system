@@ -17,14 +17,14 @@ router = APIRouter(prefix="/api/print", tags=["print"])
 
 class PrintConfigOut(BaseModel):
     default_printer: str
-    paper: str
+    paper_size: str
     copies: int
     sumatra_path: str
 
 
 class PrintConfigUpdate(BaseModel):
     default_printer: Optional[str] = None
-    paper: Optional[str] = None
+    paper_size: Optional[str] = None
     copies: Optional[int] = None
     sumatra_path: Optional[str] = None
 
@@ -55,7 +55,9 @@ def update_config(data: PrintConfigUpdate):
 
 @router.post("/test")
 def test_print(data: TestPrintIn):
+    import traceback
     try:
         return service.print_test(printer_name=data.printer)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"测试打印失败：{e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=502, detail=f"测试打印失败：{type(e).__name__}: {repr(e)}")

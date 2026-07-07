@@ -24,7 +24,7 @@ _SUMATRA_CANDIDATES = [
 
 _DEFAULTS = {
     "default_printer": "",   # 空字符串 = 用系统默认打印机
-    "paper": "A5",           # A4 | A5
+    "paper_size": "241x140", # 纸张尺寸代码：241x140（二联记账凭证半切）| A5 | A4
     "copies": 1,
     "sumatra_path": "",      # 空 = 自动探测
 }

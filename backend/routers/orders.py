@@ -110,7 +110,8 @@ def print_order(order_id: int, db: Session = Depends(get_db)):
     try:
         service.submit("delivery_a5", data)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"打印失败：{e}")
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=502, detail=f"打印失败：{type(e).__name__}: {repr(e)}")
 
     crud.mark_printed(db, order_id)
     return crud.get_order(db, order_id)
