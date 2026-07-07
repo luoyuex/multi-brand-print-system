@@ -63,8 +63,9 @@ def print_pdf(pdf_path: str, printer: Optional[str] = None, copies: int = 1) -> 
         base = [sumatra, "-print-to", printer, "-silent"]
     else:
         base = [sumatra, "-print-to-default", "-silent"]
-    # 记账凭证纸横向打印 + 指定纸张尺寸
-    base += ["-print-settings", "241x140mm,Landscape,1x"]
+    # 针式连续纸：纸张尺寸与方向由打印机驱动决定（SumatraPDF 不认自定义毫米尺寸），
+    # 软件层只锁定 1:1 不缩放、不做二次旋转，避免内容被缩小或转向。
+    base += ["-print-settings", "noscale"]
     base += ["-exit-when-done", pdf_path]
 
     copies = max(1, int(copies or 1))
