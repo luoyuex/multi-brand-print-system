@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    /* 记账凭证连续纸：宽241mm 高140mm，横向打印 */
+    @page {
+      size: 241mm 140mm;
+      margin: 5mm 15mm;  /* 上下5mm，左右15mm留较多间隙 */
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: "SimSun", "Microsoft YaHei", sans-serif;
+      color: #000;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* 标题：品牌名左对齐 */
+    .brand {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      margin: 0 0 4px;
+    }
+    .doc-title {
+      font-size: 14px;
+      font-weight: 700;
+      margin: 0;
+    }
+
+    /* 元信息：一行排列，左对齐 */
+    .meta {
+      display: flex;
+      justify-content: flex-start;
+      gap: 20px;
+      font-size: 13px;
+      margin: 6px 0 4px;
+    }
+
+    /* 商品表格 */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    thead th {
+      border-bottom: 1.5px solid #000;
+      border-top: 1px solid #000;
+      padding: 3px 4px;
+      text-align: left;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    tbody td {
+      padding: 3px 4px;
+      border-bottom: 1px solid #999;
+      font-size: 13px;
+    }
+    /* 列对齐和宽度：品名列加大到42% */
+    .col-idx   { width: 5%;  text-align: center; }
+    .col-name  { width: 42%; }
+    .col-spec  { width: 8%; text-align: center; }
+    .col-qty   { width: 10%; text-align: right; }
+    .col-price { width: 15%; text-align: right; }
+    .col-sub   { width: 20%; text-align: right; }
+
+    tfoot td {
+      padding: 4px 4px;
+      font-weight: 700;
+      font-size: 15px;
+      border-top: 1.5px solid #000;
+    }
+    .total-label { text-align: right; }
+    .total-value { text-align: right; }
+
+    /* 补货行标记 */
+    .tag-rep {
+      display: inline-block;
+      margin-left: 4px;
+      padding: 1px 5px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+      background: #000;
+      border-radius: 2px;
+      vertical-align: middle;
+    }
+    .rep { color: #000; font-weight: 700; font-size: 13px; }
+
+    /* 底部签收 */
+    .footer {
+      margin-top: 6px;
+      display: flex;
+      justify-content: flex-start;
+      gap: 30px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <span class="brand">MISS</span>
+  <span class="doc-title">发货单</span>
+
+  <div class="meta">
+    <span>客户：测试客户</span>
+    <span>单号：#1</span>
+    <span>日期：2026-07-08 10:00</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="col-idx">#</th>
+        <th class="col-name">品名</th>
+        <th class="col-spec">规格</th>
+        <th class="col-qty">数量</th>
+        <th class="col-price">单价</th>
+        <th class="col-sub">小计</th>
+      </tr>
+    </thead>
+    <tbody>
+      
+      <tr>
+        <td class="col-idx">1</td>
+        <td class="col-name">西瓜</td>
+        <td class="col-spec">个</td>
+        <td class="col-qty">10</td>
+        
+        <td class="col-price">1.80</td>
+        <td class="col-sub">18.00</td>
+        
+      </tr>
+      
+      <tr>
+        <td class="col-idx">2</td>
+        <td class="col-name">芒果</td>
+        <td class="col-spec">箱</td>
+        <td class="col-qty">2</td>
+        
+        <td class="col-price">25.00</td>
+        <td class="col-sub">50.00</td>
+        
+      </tr>
+      
+      <tr>
+        <td class="col-idx">3</td>
+        <td class="col-name">苹果<span class="tag-rep">补</span></td>
+        <td class="col-spec">个</td>
+        <td class="col-qty">5</td>
+        
+        <td class="col-price">0.00</td>
+        <td class="col-sub">0.00</td>
+        
+      </tr>
+      
+    </tbody>
+    <tfoot>
+      <tr>
+        <td class="total-label" colspan="5">合计</td>
+        <td class="total-value">¥68</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="footer">
+    <span>制单：____________</span>
+    <span>签收：____________</span>
+  </div>
+</body>
+</html>

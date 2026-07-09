@@ -44,9 +44,9 @@
                   </td>
                   <td>{{ item.spec || '—' }}</td>
                   <td>{{ item.qty }}</td>
-                  <td v-if="item.is_replacement" class="rep-cell">补发</td>
+                  <td v-if="item.is_replacement" class="rep-cell">0.00</td>
                   <td v-else>¥{{ Number(item.price).toFixed(2) }}</td>
-                  <td v-if="item.is_replacement" class="rep-cell">补发</td>
+                  <td v-if="item.is_replacement" class="rep-cell">0.00</td>
                   <td v-else>¥{{ (item.qty * item.price).toFixed(2) }}</td>
                 </tr>
               </tbody>

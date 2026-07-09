@@ -1,10 +1,12 @@
-"""模板渲染：Jinja2 填充 HTML → Chromium 命令行转 PDF。
+"""模板渲染：Jinja2 填充 HTML → Playwright 子进程转 PDF。
 
-不使用 Playwright Python API（它在 asyncio 事件循环线程上会抛 NotImplementedError），
-而是直接调用 Chromium 可执行文件的 --print-to-pdf 参数生成 PDF，
-完全绕开 asyncio 兼容性问题。
+通过启动独立 Python 子进程来运行 Playwright，
+彻底避免 asyncio 事件循环冲突（uvicorn --reload 模式下的问题）。
+子进程没有 asyncio 事件循环，Playwright sync API 可以正常工作，
+且 page.pdf() 支持 @page { size } 自定义纸张尺寸。
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -13,26 +15,12 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
+_WORKER_SCRIPT = Path(__file__).resolve().parent / "_pdf_worker.py"
 
 _env = Environment(
     loader=FileSystemLoader(str(_TEMPLATE_DIR)),
     autoescape=select_autoescape(["html", "xml"]),
 )
-
-def _find_chromium() -> str:
-    """动态查找 Chromium 可执行文件路径。"""
-    # 1. 环境变量指定
-    env_path = os.environ.get("CHROMIUM_PATH", "")
-    if env_path and os.path.isfile(env_path):
-        return env_path
-    # 2. Playwright 安装目录
-    pw_dir = Path.home() / "AppData" / "Local" / "ms-playwright"
-    if pw_dir.exists():
-        for d in sorted(pw_dir.glob("chromium-*")):
-            chrome = d / "chrome-win" / "chrome.exe"
-            if chrome.is_file():
-                return str(chrome)
-    return ""
 
 
 def render_html(template: str, data: dict) -> str:
@@ -44,46 +32,42 @@ def render_html(template: str, data: dict) -> str:
 def html_to_pdf(html: str, out_path: str, paper: str = "241x140") -> str:
     """把 HTML 渲染成 PDF 写到 out_path，返回该路径。
 
-    直接调用 Chromium --print-to-pdf，不依赖 Playwright Python API，
-    彻底避免 asyncio 事件循环兼容性问题。
+    通过独立子进程运行 Playwright，避免 asyncio 事件循环冲突。
+    Playwright 的 page.pdf() 支持 @page { size } 自定义纸张尺寸。
     """
-    # 1. 写 HTML 到临时文件（Chromium 需要文件路径或 URL）
     import tempfile
+
+    # 1. 写 HTML 到临时文件
     fd, html_path = tempfile.mkstemp(suffix=".html", prefix="print_")
     os.close(fd)
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html)
 
     try:
-        # 2. 调 Chromium 生成 PDF
-        chrome = _find_chromium()
-        if not chrome:
-            raise RuntimeError(
-                "Chromium 未找到。请运行: playwright install chromium"
-            )
-
-        cmd = [
-            chrome,
-            "--headless",
-            "--disable-gpu",
-            "--no-sandbox",
-            f"--print-to-pdf={out_path}",
-            "--print-to-pdf-no-header",     # 不加 Chrome 默认页眉页脚
-            html_path,
-        ]
-
+        # 2. 启动子进程运行 Playwright
+        python_exe = sys.executable
         result = subprocess.run(
-            cmd,
+            [python_exe, str(_WORKER_SCRIPT)],
+            input=json.dumps({"html_path": html_path, "pdf_path": out_path}),
             capture_output=True,
+            text=True,
             timeout=30,
+            encoding="utf-8",
             creationflags=_no_window_flag(),
         )
-        # Chromium headless 返回码 0 表示成功
+
         if not os.path.isfile(out_path):
-            raise RuntimeError(
-                f"Chromium PDF 生成失败 (code {result.returncode}): "
-                f"{result.stderr.decode('gbk', errors='replace')[:300] if result.stderr else '无输出'}"
-            )
+            err = result.stderr or result.stdout or "无输出"
+            raise RuntimeError(f"PDF 生成失败: {err[:300]}")
+
+        # 检查子进程返回的结果
+        try:
+            resp = json.loads(result.stdout.strip())
+            if not resp.get("ok"):
+                raise RuntimeError(f"Playwright 报错: {resp.get('error', '未知错误')}")
+        except (json.JSONDecodeError, ValueError):
+            pass  # 子进程可能没输出 JSON，但 PDF 文件已生成即可
+
     finally:
         try:
             os.remove(html_path)
@@ -94,12 +78,12 @@ def html_to_pdf(html: str, out_path: str, paper: str = "241x140") -> str:
 
 
 def ensure_initialized():
-    """兼容接口：Chromium 命令行模式无需预初始化，此函数为空操作。"""
+    """兼容接口：子进程模式无需预初始化。"""
     pass
 
 
 def shutdown():
-    """兼容接口：Chromium 命令行模式无需关闭，此函数为空操作。"""
+    """兼容接口：子进程模式无需关闭。"""
     pass
 
 
