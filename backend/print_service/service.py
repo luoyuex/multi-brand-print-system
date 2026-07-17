@@ -20,8 +20,8 @@ _print_lock = threading.Lock()
 
 # 纸张尺寸代码 → (宽mm, 高mm) 映射
 PAPER_SIZES = {
-    "140x241": (140, 241),   # 二联记账凭证半切：竖版渲染，打印时旋转90°回到走纸140
-    "241x140": (241, 139.5), # 二联记账凭证（二等分，整张279高的一半，横版旧配置）
+    "241x140": (241, 139.5), # 一联记账凭证（横版，方向与纸一致）：默认，商品行沿走纸方向向下、超页自动续联
+    "140x241": (140, 241),   # 旧竖版渲染（打印时旋转90°回到走纸140），保留兼容
     "241x280": (241, 279),   # 二联记账凭证（整切）
     "A5":      (148, 210),
     "A4":      (210, 297),
@@ -39,8 +39,8 @@ def _resolve_paper(paper_code: str):
             return (float(parts[0]), float(parts[1]))
     except (ValueError, AttributeError):
         pass
-    # 默认记账凭证半切（竖版渲染，打印时旋转 90° 送纸）
-    return PAPER_SIZES["140x241"]
+    # 默认一联记账凭证（横版 241x140，方向与纸一致，无需旋转）
+    return PAPER_SIZES["241x140"]
 
 
 def _do_print(template: str, data: dict, paper_code: str, printer_name: str, copies: int) -> dict:
@@ -88,7 +88,7 @@ def submit(template: str, data: dict, *,
     """提交一个打印任务并同步等待完成。"""
     cfg = config.load_config()
     printer_name = printer_name if printer_name is not None else cfg["default_printer"]
-    paper_size = paper_size or cfg.get("paper_size", "140x241")
+    paper_size = paper_size or cfg.get("paper_size", "241x140")
     copies = copies or cfg["copies"]
 
     with _print_lock:
