@@ -7,8 +7,10 @@ Windows 下：
 """
 
 import glob
+import os
 import subprocess
 import sys
+import tempfile
 from typing import Optional
 
 from . import config
@@ -71,11 +73,45 @@ def _set_form_length(printer_name: str, mm: float = 140.0) -> None:
         pass  # 静默失败，不影响主流程
 
 
+def _rotate_pdf(src_path: str, degrees: int) -> Optional[str]:
+    """把 PDF 每一页旋转 degrees 度，写到新的临时文件，返回其路径。
+
+    用于「渲染保持 241x140 横版不变，打印时整体旋转 90°」的场景：
+    模板/PDF 不动，只把送去打印机的那一份转向，避免依赖 SumatraPDF/驱动
+    对页面方向的自动猜测（那会导致针式连续纸走纸长度错乱）。
+
+    degrees 为 0 或非法值时返回 None（表示无需旋转，直接打原文件）。
+    旋转失败时返回 None，静默降级为打印原始 PDF。
+    """
+    if not degrees:
+        return None
+    try:
+        import fitz  # pymupdf
+    except ImportError:
+        return None
+
+    try:
+        doc = fitz.open(src_path)
+        for page in doc:
+            # set_rotation 是绝对角度；叠加当前已有旋转，避免覆盖
+            page.set_rotation((page.rotation + degrees) % 360)
+        fd, rotated_path = tempfile.mkstemp(suffix=".pdf", prefix="print_rot_")
+        os.close(fd)
+        doc.save(rotated_path)
+        doc.close()
+        return rotated_path
+    except Exception:
+        return None
+
+
 def print_pdf(pdf_path: str, printer: Optional[str] = None, copies: int = 1) -> None:
     """用 SumatraPDF 静默打印 PDF。
 
     printer: 打印机名，空/None = 用系统默认打印机（-print-to-default）。
     copies:  份数，通过多次调用实现（SumatraPDF 命令行无直接份数参数）。
+
+    打印前按配置 print_rotate 旋转 PDF（默认 90°）：渲染出的 241x140 横版
+    PDF 不变，只把送打印机的副本转成 140x241 纵向，正对针式连续纸走纸方向。
 
     抛出异常表示打印失败（找不到 SumatraPDF / 命令返回非 0）。
     """
@@ -85,31 +121,44 @@ def print_pdf(pdf_path: str, printer: Optional[str] = None, copies: int = 1) -> 
             "未找到 SumatraPDF，请安装后重试，或在打印配置中指定 sumatra_path。"
         )
 
-    # 组装命令：静默打印
-    if printer:
-        base = [sumatra, "-print-to", printer, "-silent"]
-    else:
-        base = [sumatra, "-print-to-default", "-silent"]
-    # noscale：1:1打印，不缩放
-    # 不加 landscape：驱动已配置横向，SumatraPDF 再加会导致PDF被旋转，
-    # 驱动收到241mm"高"的页面后走纸变成241mm而非140mm
-    base += ["-print-settings", "noscale"]
-    base += ["-exit-when-done", pdf_path]
+    # 打印前旋转：渲染不动，只转送打印机的这份
+    cfg = config.load_config()
+    degrees = int(cfg.get("print_rotate", 0) or 0) % 360
+    rotated_path = _rotate_pdf(pdf_path, degrees)
+    target_pdf = rotated_path or pdf_path
 
-    copies = max(1, int(copies or 1))
-    for _ in range(copies):
-        result = subprocess.run(
-            base,
-            capture_output=True, text=True, timeout=60,
-            creationflags=_no_window_flag(),
-        )
-        # SumatraPDF 返回 0 或 1 都可能表示成功（1 有时只是信息提示），
-        # 真正的失败通常有 stderr 内容。这里只在明显错误时抛异常。
-        if result.returncode not in (0, 1):
-            raise RuntimeError(
-                f"SumatraPDF 打印失败 (code {result.returncode}): "
-                f"{result.stderr or result.stdout or '无输出'}"
+    try:
+        # 组装命令：静默打印
+        if printer:
+            base = [sumatra, "-print-to", printer, "-silent"]
+        else:
+            base = [sumatra, "-print-to-default", "-silent"]
+        # noscale：1:1打印，不缩放。
+        # 旋转已在 PDF 页面层面完成（/Rotate），这里不再让 SumatraPDF/驱动
+        # 自行旋转，避免走纸长度被算错。
+        base += ["-print-settings", "noscale"]
+        base += ["-exit-when-done", target_pdf]
+
+        copies = max(1, int(copies or 1))
+        for _ in range(copies):
+            result = subprocess.run(
+                base,
+                capture_output=True, text=True, timeout=60,
+                creationflags=_no_window_flag(),
             )
+            # SumatraPDF 返回 0 或 1 都可能表示成功（1 有时只是信息提示），
+            # 真正的失败通常有 stderr 内容。这里只在明显错误时抛异常。
+            if result.returncode not in (0, 1):
+                raise RuntimeError(
+                    f"SumatraPDF 打印失败 (code {result.returncode}): "
+                    f"{result.stderr or result.stdout or '无输出'}"
+                )
+    finally:
+        if rotated_path:
+            try:
+                os.remove(rotated_path)
+            except OSError:
+                pass
 
 
 def _find_wps_et() -> Optional[str]:
