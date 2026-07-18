@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
+from datetime import datetime, date, timedelta
 import models, schemas, crud
 from database import get_db
 from print_service import service
@@ -52,8 +53,15 @@ def _build_print_data(order: models.Order) -> dict:
 
 
 @router.get("/", response_model=List[schemas.OrderOut])
-def list_orders(db: Session = Depends(get_db)):
-    return crud.get_orders(db)
+def list_orders(
+    start_date: Optional[date] = Query(None, description="起始日期 YYYY-MM-DD（含当天）"),
+    end_date: Optional[date] = Query(None, description="结束日期 YYYY-MM-DD（含当天）"),
+    db: Session = Depends(get_db),
+):
+    # 把日期转成 [start, end) 的时间区间：end_date 那天整天都算在内
+    start = datetime.combine(start_date, datetime.min.time()) if start_date else None
+    end = datetime.combine(end_date + timedelta(days=1), datetime.min.time()) if end_date else None
+    return crud.get_orders(db, start=start, end=end)
 
 
 @router.get("/{order_id}", response_model=schemas.OrderOut)
@@ -62,6 +70,14 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
     if not obj:
         raise HTTPException(status_code=404, detail="订单不存在")
     return obj
+
+
+@router.delete("/{order_id}", status_code=204)
+def delete_order(order_id: int, db: Session = Depends(get_db)):
+    obj = crud.delete_order(db, order_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    return None
 
 
 @router.post("/", response_model=schemas.OrderOut, status_code=201)

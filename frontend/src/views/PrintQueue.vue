@@ -2,8 +2,33 @@
   <div class="page-wrap">
     <el-card class="section-card">
       <template #header>
-        <span class="card-title">打印列表</span>
-        <el-button size="small" style="float:right;" :loading="loading" @click="loadOrders">刷新</el-button>
+        <div class="card-header">
+          <span class="card-title">打印列表</span>
+          <div class="header-tools">
+            <el-date-picker
+              v-model="startDate"
+              type="date"
+              placeholder="起始日期"
+              value-format="YYYY-MM-DD"
+              size="small"
+              :clearable="false"
+              class="date-input"
+              @change="loadOrders"
+            />
+            <span class="date-sep">至</span>
+            <el-date-picker
+              v-model="endDate"
+              type="date"
+              placeholder="结束日期"
+              value-format="YYYY-MM-DD"
+              size="small"
+              :clearable="false"
+              class="date-input"
+              @change="loadOrders"
+            />
+            <el-button size="small" :loading="loading" @click="loadOrders">刷新</el-button>
+          </div>
+        </div>
       </template>
 
       <el-empty v-if="!loading && orders.length === 0" description="暂无订单" :image-size="80" />
@@ -25,6 +50,7 @@
             <el-button size="small" @click="toggleEdit(order)">
               {{ editingId === order.id ? '取消' : '编辑' }}
             </el-button>
+            <el-button size="small" type="danger" plain :loading="deletingId === order.id" @click="handleDelete(order)">删除</el-button>
           </div>
         </div>
 
@@ -87,17 +113,26 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import { orderApi } from '../api'
 
+function todayStr() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 const orders      = ref([])
+const startDate   = ref(todayStr())   // 默认当天
+const endDate     = ref(todayStr())
 const loading     = ref(false)
+
 const expandedIds = ref(new Set())
 const editingId   = ref(null)
 const editItems   = ref([])
 const saving      = ref(false)
 const printingId  = ref(null)
+const deletingId  = ref(null)
 
 const editTotal = computed(() =>
   editItems.value
@@ -121,7 +156,10 @@ function formatDate(dt) {
 async function loadOrders() {
   loading.value = true
   try {
-    orders.value = await orderApi.list()
+    const params = {}
+    if (startDate.value) params.start_date = startDate.value
+    if (endDate.value) params.end_date = endDate.value
+    orders.value = await orderApi.list(params)
   } catch (e) {
     ElMessage.error(e.message)
   } finally {
@@ -187,6 +225,35 @@ async function handlePrint(order) {
   }
 }
 
+// 删除订单：二次确认后调后端硬删除（明细随之级联删除），成功后从列表移除。
+async function handleDelete(order) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除订单 #${order.id}（${order.customer}）？该操作不可恢复。`,
+      '删除订单',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' }
+    )
+  } catch {
+    return   // 用户取消
+  }
+  deletingId.value = order.id
+  try {
+    await orderApi.remove(order.id)
+    orders.value = orders.value.filter((o) => o.id !== order.id)
+    expandedIds.value.delete(order.id)
+    expandedIds.value = new Set(expandedIds.value)
+    if (editingId.value === order.id) {
+      editingId.value = null
+      editItems.value = []
+    }
+    ElMessage.success('已删除')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    deletingId.value = null
+  }
+}
+
 onMounted(() => {
   loadOrders()
 })
@@ -195,6 +262,34 @@ onMounted(() => {
 <style scoped>
 .section-card { margin-bottom: 14px; }
 .card-title   { font-weight: 600; font-size: 15px; }
+
+/* ── 卡片头部 ── */
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.header-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.date-sep { color: #909399; font-size: 13px; }
+/* 单个日期选择器更窄，避免移动端过宽 */
+.header-tools .date-input {
+  width: 130px;
+}
+.header-tools .date-input :deep(.el-input__wrapper) {
+  min-width: 0;
+}
+
+/* ── 移动端：日期选择器等分一行 ── */
+@media (max-width: 600px) {
+  .header-tools .date-input { flex: 1 1 0; width: auto; min-width: 0; }
+}
 
 /* ── 订单卡片 ── */
 .order-item {

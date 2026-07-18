@@ -35,12 +35,13 @@ export const productApi = {
 }
 
 export const orderApi = {
-  list:   ()         => http.get('/orders/'),
+  list:   (params)   => http.get('/orders/', { params }),
   get:    (id)       => http.get(`/orders/${id}`),
   create: (data)     => http.post('/orders/', data),
   update: (id, data) => http.put(`/orders/${id}`, data),
   // 触发后端静默打印：成功出纸后订单才标记为已打印
   print:  (id)       => http.post(`/orders/${id}/print`),
+  remove: (id)       => http.delete(`/orders/${id}`),
 }
 
 export const printApi = {

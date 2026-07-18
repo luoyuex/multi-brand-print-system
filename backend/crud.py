@@ -1,5 +1,5 @@
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 import models, schemas
@@ -107,8 +107,13 @@ def _order_q(db: Session):
         joinedload(models.Order.items),
     )
 
-def get_orders(db: Session):
-    return _order_q(db).order_by(models.Order.created_at.desc()).all()
+def get_orders(db: Session, start: Optional[datetime] = None, end: Optional[datetime] = None):
+    q = _order_q(db)
+    if start is not None:
+        q = q.filter(models.Order.created_at >= start)
+    if end is not None:
+        q = q.filter(models.Order.created_at < end)
+    return q.order_by(models.Order.created_at.desc()).all()
 
 def get_order(db: Session, order_id: int):
     return _order_q(db).filter(models.Order.id == order_id).first()
@@ -135,4 +140,12 @@ def mark_printed(db: Session, order_id: int):
     obj.printed_at = datetime.now()
     db.commit()
     db.refresh(obj)
+    return obj
+
+def delete_order(db: Session, order_id: int):
+    obj = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not obj:
+        return None
+    db.delete(obj)   # order_items 通过 cascade="all, delete-orphan" 一并删除
+    db.commit()
     return obj
