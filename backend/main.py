@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from database import engine, Base
-from routers import brands, products, orders, stores, print as print_router
+from routers import brands, products, orders, stores, print as print_router, bills
 
 # 建表（首次启动自动建表）
 Base.metadata.create_all(bind=engine)
@@ -22,6 +22,7 @@ def _run_migrations():
             ("store_id",   "ALTER TABLE orders ADD COLUMN store_id INT"),
             ("status",     "ALTER TABLE orders ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'pending'"),
             ("printed_at", "ALTER TABLE orders ADD COLUMN printed_at DATETIME"),
+            ("bill_id",    "ALTER TABLE orders ADD COLUMN bill_id INT"),
         ],
         "order_items": [
             ("is_replacement", "ALTER TABLE order_items ADD COLUMN is_replacement TINYINT(1) NOT NULL DEFAULT 0"),
@@ -58,6 +59,7 @@ app.include_router(stores.router)
 app.include_router(products.router)
 app.include_router(orders.router)
 app.include_router(print_router.router)
+app.include_router(bills.router)
 
 
 @app.on_event("startup")

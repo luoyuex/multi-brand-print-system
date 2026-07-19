@@ -149,3 +149,206 @@ def delete_order(db: Session, order_id: int):
     db.delete(obj)   # order_items 通过 cascade="all, delete-orphan" 一并删除
     db.commit()
     return obj
+
+
+# ── Bill（对账单）──────────────────────────────────────
+def _day_range(start: date, end: date):
+    """把日期区间转成 [start, end+1) 的时间区间：end 那天整天都算在内。
+
+    与 routers/orders.py 里的换算规则一致，保证按天筛选口径统一。
+    """
+    s = datetime.combine(start, datetime.min.time())
+    e = datetime.combine(end + timedelta(days=1), datetime.min.time())
+    return s, e
+
+
+def _iter_bill_lines(orders):
+    """把订单列表拍平成明细流，应用补货免费规则（与 service.build_print_data 一致）：
+    补货行单价/小计强制为 0、不计入合计。逐条 yield (order, item, qty, price, subtotal)。
+    """
+    for order in orders:
+        for it in order.items:
+            is_rep = bool(it.is_replacement)
+            qty = float(it.qty)
+            price = 0.0 if is_rep else float(it.price)
+            subtotal = price * qty
+            yield order, it, qty, price, subtotal
+
+
+def get_unbilled_orders(db: Session, store_id: int, start: date, end: date):
+    """某客户账期区间内、尚未出账（bill_id 为空）的订单，按下单时间升序。"""
+    s, e = _day_range(start, end)
+    return (
+        _order_q(db)
+        .filter(
+            models.Order.store_id == store_id,
+            models.Order.bill_id.is_(None),
+            models.Order.created_at >= s,
+            models.Order.created_at < e,
+        )
+        .order_by(models.Order.created_at.asc())
+        .all()
+    )
+
+
+def get_unbilled_store_ids(db: Session, start: date, end: date):
+    """账期区间内有未出账订单的所有客户 store_id（去重，一键出账用）。"""
+    s, e = _day_range(start, end)
+    rows = (
+        db.query(models.Order.store_id)
+        .filter(
+            models.Order.bill_id.is_(None),
+            models.Order.store_id.isnot(None),
+            models.Order.created_at >= s,
+            models.Order.created_at < e,
+        )
+        .distinct()
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
+def preview_bill(db: Session, store_id: int, start: date, end: date):
+    """预览某客户某账期的未出账汇总（按天分组），不写库。"""
+    orders = get_unbilled_orders(db, store_id, start, end)
+    store = get_store(db, store_id)
+    customer = store.name if store else (orders[0].customer if orders else "")
+    brand_name = orders[0].brand_name if orders else ""
+
+    days = {}   # date -> {date, items, subtotal}；orders 已按时间升序，天然按天有序
+    total = 0.0
+    for order, it, qty, price, subtotal in _iter_bill_lines(orders):
+        d = order.created_at.date()
+        day = days.setdefault(d, {"date": d, "items": [], "subtotal": 0.0})
+        day["items"].append({
+            "product_name": it.product_name,
+            "spec": it.spec or "",
+            "qty": qty,
+            "price": price,
+            "subtotal": subtotal,
+            "is_replacement": bool(it.is_replacement),
+        })
+        day["subtotal"] += subtotal
+        total += subtotal
+
+    return {
+        "store_id": store_id,
+        "customer": customer,
+        "brand_name": brand_name,
+        "period_start": start,
+        "period_end": end,
+        "order_count": len(orders),
+        "total": total,
+        "days": list(days.values()),
+    }
+
+
+def create_bill(db: Session, store_id: int, start: date, end: date, note: str = None):
+    """出账：把该客户区间内未出账订单快照成一张账单。
+
+    无未出账订单则返回 None（路由据此报 400）。成功后把这些订单的 bill_id
+    指向新账单，之后不再重复计入任何账单。
+    """
+    orders = get_unbilled_orders(db, store_id, start, end)
+    if not orders:
+        return None
+
+    store = get_store(db, store_id)
+    customer = store.name if store else (orders[0].customer or "")
+
+    bill = models.Bill(
+        store_id=store_id,
+        customer=customer,
+        brand_id=orders[0].brand_id,
+        brand_name=orders[0].brand_name,
+        period_start=start,
+        period_end=end,
+        total_amount=0,
+        order_count=len(orders),
+        note=note,
+    )
+    db.add(bill)
+    db.flush()   # 取到 bill.id
+
+    total = 0.0
+    for order, it, qty, price, subtotal in _iter_bill_lines(orders):
+        db.add(models.BillItem(
+            bill_id=bill.id,
+            order_id=order.id,
+            order_date=order.created_at.date(),
+            product_name=it.product_name,
+            spec=it.spec,
+            qty=qty,
+            price=price,
+            subtotal=subtotal,
+            is_replacement=bool(it.is_replacement),
+        ))
+        total += subtotal
+
+    bill.total_amount = total
+    for order in orders:
+        order.bill_id = bill.id   # 认领，防重复出账
+
+    db.commit()
+    db.refresh(bill)
+    return bill
+
+
+def _bill_q(db: Session):
+    return db.query(models.Bill).options(joinedload(models.Bill.items))
+
+
+def get_bills(db: Session, *, store_id=None, keyword=None, start=None, end=None,
+              sent=None, paid=None):
+    """账单列表查询。start/end 为账期重叠过滤；sent/paid 为三态（None=全部）。"""
+    q = _bill_q(db)
+    if store_id is not None:
+        q = q.filter(models.Bill.store_id == store_id)
+    if keyword:
+        q = q.filter(models.Bill.customer.like(f"%{keyword}%"))
+    # 账期 [period_start, period_end] 与查询区间 [start, end] 有交集即命中
+    if start is not None:
+        q = q.filter(models.Bill.period_end >= start)
+    if end is not None:
+        q = q.filter(models.Bill.period_start <= end)
+    if sent is not None:
+        q = q.filter(models.Bill.sent == sent)
+    if paid is not None:
+        q = q.filter(models.Bill.paid == paid)
+    return q.order_by(models.Bill.created_at.desc()).all()
+
+
+def get_bill(db: Session, bill_id: int):
+    return _bill_q(db).filter(models.Bill.id == bill_id).first()
+
+
+def mark_bill_sent(db: Session, bill_id: int, value: bool):
+    obj = db.query(models.Bill).filter(models.Bill.id == bill_id).first()
+    if not obj:
+        return None
+    obj.sent = value
+    obj.sent_at = datetime.now() if value else None
+    db.commit()
+    return get_bill(db, bill_id)
+
+
+def mark_bill_paid(db: Session, bill_id: int, value: bool):
+    obj = db.query(models.Bill).filter(models.Bill.id == bill_id).first()
+    if not obj:
+        return None
+    obj.paid = value
+    obj.paid_at = datetime.now() if value else None
+    db.commit()
+    return get_bill(db, bill_id)
+
+
+def delete_bill(db: Session, bill_id: int):
+    obj = db.query(models.Bill).filter(models.Bill.id == bill_id).first()
+    if not obj:
+        return None
+    # 先释放关联订单，允许它们重新出账
+    db.query(models.Order).filter(models.Order.bill_id == bill_id).update(
+        {models.Order.bill_id: None}, synchronize_session=False)
+    db.delete(obj)   # bill_items 随 cascade 删除
+    db.commit()
+    return obj

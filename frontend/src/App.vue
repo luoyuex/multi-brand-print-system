@@ -21,6 +21,7 @@
         >
           <el-menu-item index="/">📝 录单</el-menu-item>
           <el-menu-item index="/print">🖨️ 打印列表</el-menu-item>
+          <el-menu-item index="/bills">💰 账单</el-menu-item>
           <el-menu-item index="/stores">🏪 店铺管理</el-menu-item>
           <el-menu-item index="/products">📦 商品管理</el-menu-item>
           <el-menu-item index="/brands">🏷️ 品牌管理</el-menu-item>
@@ -58,6 +59,7 @@ const { isMobile } = useBreakpoint()
 const tabs = [
   { path: '/',         icon: '📝', label: '录单'   },
   { path: '/print',    icon: '🖨️', label: '打印'   },
+  { path: '/bills',    icon: '💰', label: '账单'   },
   { path: '/stores',   icon: '🏪', label: '店铺'   },
   { path: '/products', icon: '📦', label: '商品'   },
   { path: '/brands',   icon: '🏷️', label: '品牌'  },

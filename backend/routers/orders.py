@@ -9,49 +9,6 @@ from print_service import service
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
 
-def _build_print_data(order: models.Order) -> dict:
-    """把订单模型转成打印模板所需的数据结构。
-
-    - 单价/小计保留两位小数（模板里再格式化）；
-    - 合计取整（与前端页面显示一致）。
-    - 数量为整数时去掉小数尾巴，显示更干净。
-    """
-    def fmt_qty(q):
-        f = float(q)
-        return int(f) if f == int(f) else round(f, 2)
-
-    items = []
-    total = 0.0
-    for i, it in enumerate(order.items, start=1):
-        is_replacement = bool(it.is_replacement)
-        qty = float(it.qty)
-        # 补货行免费补发：单价/小计强制为 0，不计入合计
-        price = 0.0 if is_replacement else float(it.price)
-        subtotal = price * qty
-        total += subtotal
-        items.append({
-            "index": i,
-            "product_name": it.product_name,
-            "spec": it.spec or "",
-            "qty": fmt_qty(qty),
-            "price": price,
-            "subtotal": subtotal,
-            "is_replacement": is_replacement,
-        })
-
-    created = order.created_at
-    created_str = created.strftime("%Y-%m-%d %H:%M") if created else ""
-
-    return {
-        "brand_name": order.brand_name,
-        "customer": order.customer,
-        "order_id": order.id,
-        "created_at": created_str,
-        "items": items,
-        "total": round(total),
-    }
-
-
 @router.get("/", response_model=List[schemas.OrderOut])
 def list_orders(
     start_date: Optional[date] = Query(None, description="起始日期 YYYY-MM-DD（含当天）"),
@@ -122,7 +79,7 @@ def print_order(order_id: int, db: Session = Depends(get_db)):
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
 
-    data = _build_print_data(order)
+    data = service.build_print_data(order)
     try:
         service.submit("delivery_a5", data)
     except Exception as e:

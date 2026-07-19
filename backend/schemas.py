@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, date
 
 
 # ── Brand ──────────────────────────────────────────────
@@ -95,6 +95,79 @@ class OrderOut(BaseModel):
     created_at: datetime
     status: str             # pending | printed
     printed_at: Optional[datetime] = None
+    bill_id: Optional[int] = None   # 已出账则非空
     items: List[OrderItemOut]
     class Config:
         from_attributes = True
+
+
+# ── Bill（对账单）────────────────────────────────────────
+class BillItemOut(BaseModel):
+    id: int
+    order_id: Optional[int] = None
+    order_date: Optional[date] = None
+    product_name: Optional[str] = None
+    spec: Optional[str] = None
+    qty: float
+    price: float
+    subtotal: float
+    is_replacement: bool = False
+    class Config:
+        from_attributes = True
+
+class BillOut(BaseModel):
+    id: int
+    store_id: Optional[int] = None
+    customer: str
+    brand_id: Optional[int] = None
+    brand_name: Optional[str] = None
+    period_start: date
+    period_end: date
+    total_amount: float
+    order_count: int
+    sent: bool
+    sent_at: Optional[datetime] = None
+    paid: bool
+    paid_at: Optional[datetime] = None
+    note: Optional[str] = None
+    created_at: datetime
+    items: List[BillItemOut] = []
+    class Config:
+        from_attributes = True
+
+# 生成/预览入参：某客户 + 账期区间（含首尾两天）
+class BillPreviewIn(BaseModel):
+    store_id: int
+    start: date
+    end: date
+
+class BillCreate(BillPreviewIn):
+    note: Optional[str] = None
+
+# 预览用的轻量明细行（未落库）
+class BillLine(BaseModel):
+    product_name: Optional[str] = None
+    spec: Optional[str] = None
+    qty: float
+    price: float
+    subtotal: float
+    is_replacement: bool = False
+
+class BillPreviewDay(BaseModel):
+    date: date
+    items: List[BillLine]
+    subtotal: float
+
+class BillPreviewOut(BaseModel):
+    store_id: int
+    customer: str
+    brand_name: Optional[str] = None
+    period_start: date
+    period_end: date
+    order_count: int
+    total: float
+    days: List[BillPreviewDay]
+
+# 标记已发送 / 已回款复用（value=True 置位，False 取消）
+class MarkStatusIn(BaseModel):
+    value: bool

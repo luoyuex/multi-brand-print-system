@@ -77,6 +77,44 @@ def html_to_pdf(html: str, out_path: str, paper: str = "241x140") -> str:
     return out_path
 
 
+def html_to_image(html: str, out_path: str) -> str:
+    """把 HTML 渲染成 PNG 图片写到 out_path，返回该路径（账单小票图片用）。
+
+    与 html_to_pdf 共用 _pdf_worker 子进程，只是给它传 img_path 走截图分支，
+    同样绕开 asyncio 事件循环冲突。
+    """
+    import tempfile
+
+    fd, html_path = tempfile.mkstemp(suffix=".html", prefix="bill_")
+    os.close(fd)
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    try:
+        python_exe = sys.executable
+        result = subprocess.run(
+            [python_exe, str(_WORKER_SCRIPT)],
+            input=json.dumps({"html_path": html_path, "img_path": out_path}),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            encoding="utf-8",
+            creationflags=_no_window_flag(),
+        )
+
+        if not os.path.isfile(out_path):
+            err = result.stderr or result.stdout or "无输出"
+            raise RuntimeError(f"图片生成失败: {err[:300]}")
+
+    finally:
+        try:
+            os.remove(html_path)
+        except OSError:
+            pass
+
+    return out_path
+
+
 def ensure_initialized():
     """兼容接口：子进程模式无需预初始化。"""
     pass
