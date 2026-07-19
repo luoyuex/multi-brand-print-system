@@ -3,9 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <style>
-    /* 页面 = 一联连续凭证纸：241mm 宽（横向，两针孔之间）× 140mm 高（走纸方向）。
-       内容窄条竖排：商品行沿走纸方向（向下）延伸，超过一联自动分页到下一联，
-       品类多时不再受固定宽度限制。页面方向与纸张一致，打印机无需旋转。 */
+    /* 横版渲染 = 241mm 宽 × 139.5mm 高，正好一联连续纸（走纸方向锁死 139.5mm，撕裂线在此）。
+       文字正着读，不旋转。走纸方向只有 139.5mm，扣掉 60mm 顶边后留给表格约 79.5mm（≈15 行），
+       其中表头+备注+总计固定占 5 行，商品行最多约 10 行，靠 min_rows 控制填充行数
+       保证整单落在一联内、只出一页、不换页。 */
     @page {
       size: {{ paper_width }}mm {{ paper_height }}mm;
       margin: 0;
@@ -19,8 +20,8 @@
       color: #000;
     }
 
-    /* 页面容器：固定为一联实际尺寸。四周留出边距（上下 8mm，左 12mm 避开针孔，
-       右 10mm），内容整体偏窄，右侧再自然留出剩余空白。 */
+    /* 页面容器：固定为一联实际尺寸。顶部 60mm 留白（打印机横向旋转后成为定位偏移，
+       必须保留），左右各 10mm 避开针孔。 */
     .page {
       width: {{ paper_width }}mm;
       height: {{ paper_height }}mm;
@@ -39,7 +40,7 @@
 
     /* ── 统一网格表格：固定窄宽度，不随容器拉伸 ── */
     table {
-      width: 97mm;           /* 窄表格 = 6列之和(12+20+13+12+20+20)，仅用幅面一部分，右侧留白 */
+      width: 97mm;           /* 窄表格 = 6列之和(12+24+13+14+20+12)，仅用幅面一部分，右侧留白 */
       border-collapse: collapse;
       table-layout: fixed;
     }
@@ -64,13 +65,13 @@
     thead { display: table-header-group; }
     tbody tr { break-inside: avoid; page-break-inside: avoid; }
 
-    /* 列宽固定 mm：序号 品种 数量 售价 金额 规格，合计 160mm */
+    /* 列宽固定 mm：序号 品种 数量 售价 金额 规格 */
     col.c-idx   { width: 12mm; }
-    col.c-name  { width: 20mm; }
+    col.c-name  { width: 24mm; }
     col.c-qty   { width: 13mm; }
-    col.c-price { width: 12mm; }
+    col.c-price { width: 14mm; }
     col.c-sub   { width: 20mm; }
-    col.c-spec  { width: 20mm; }
+    col.c-spec  { width: 12mm; }
 
     /* 补货标记 */
     .tag-rep {
@@ -122,7 +123,7 @@
       </tr>
     </thead>
 
-    <!-- 商品明细：行沿走纸方向向下延伸，超过一联自动续到下一联 -->
+    <!-- 商品明细：行沿走纸方向向下延伸 -->
     <tbody>
       {% for item in items %}
       <tr>
@@ -139,8 +140,10 @@
         <td class="al-c">{{ item.spec or '' }}</td>
       </tr>
       {% endfor %}
-      {# 补足到最少24行，保持表格完整、行数固定 #}
-      {% set min_rows = 14 %}
+      {# 横版一联（241 宽 × 139.5 高）：走纸方向 139.5mm 扣掉 60mm 顶边后仅约 79.5mm（≈15 行），
+         表头+备注+总计固定占 5 行，商品行最多约 10 行。取 9 行填充留安全余量，
+         保证小单也只出一页、不换页。 #}
+      {% set min_rows = 9 %}
       {% if items|length < min_rows %}
       {% for i in range(min_rows - items|length) %}
       <tr>
