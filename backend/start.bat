@@ -1,0 +1,3 @@
+@echo off
+echo 启动后端服务（支持局域网访问）...
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload

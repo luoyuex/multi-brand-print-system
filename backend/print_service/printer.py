@@ -179,9 +179,15 @@ def _set_form_length(printer_name: str, mm: float = 140.0) -> None:
 def _rotate_pdf(src_path: str, degrees: int) -> Optional[str]:
     """把 PDF 每一页旋转 degrees 度，写到新的临时文件，返回其路径。
 
-    用于「渲染保持 241x140 横版不变，打印时整体旋转 90°」的场景：
-    模板/PDF 不动，只把送去打印机的那一份转向，避免依赖 SumatraPDF/驱动
-    对页面方向的自动猜测（那会导致针式连续纸走纸长度错乱）。
+    用于「渲染出竖版 140x241，打印时整体旋转 90° 成横版 241x140」的场景。
+
+    关键：不能用 page.set_rotation()（那只写 /Rotate 标志位，页面真实尺寸
+    仍是竖版；SumatraPDF 用 noscale 打印时会忽略该标志位，按原始竖版内容打，
+    导致「PDF 阅读器里看着转好了、打出来方向却不对」）。
+
+    这里改用「烤入式旋转」：新建一个宽高互换的实体页（rotation=0），用
+    show_pdf_page(rotate=deg) 把源页真正画上去。这样 SumatraPDF 看到的就是
+    货真价实的横版页，noscale 打出来方向正确。
 
     degrees 为 0 或非法值时返回 None（表示无需旋转，直接打原文件）。
     旋转失败时返回 None，静默降级为打印原始 PDF。
@@ -194,14 +200,23 @@ def _rotate_pdf(src_path: str, degrees: int) -> Optional[str]:
         return None
 
     try:
-        doc = fitz.open(src_path)
-        for page in doc:
-            # set_rotation 是绝对角度；叠加当前已有旋转，避免覆盖
-            page.set_rotation((page.rotation + degrees) % 360)
+        src = fitz.open(src_path)
+        out = fitz.open()
+        swap = degrees in (90, 270)  # 90/270 度需要宽高互换
+        for page in src:
+            r = page.rect
+            if swap:
+                new_w, new_h = r.height, r.width
+            else:
+                new_w, new_h = r.width, r.height
+            new_page = out.new_page(width=new_w, height=new_h)
+            # 把源页内容旋转 degrees 度画到新页上（铺满整页）
+            new_page.show_pdf_page(new_page.rect, src, page.number, rotate=degrees)
         fd, rotated_path = tempfile.mkstemp(suffix=".pdf", prefix="print_rot_")
         os.close(fd)
-        doc.save(rotated_path)
-        doc.close()
+        out.save(rotated_path)
+        out.close()
+        src.close()
         return rotated_path
     except Exception:
         return None
@@ -230,6 +245,29 @@ def print_pdf(pdf_path: str, printer: Optional[str] = None, copies: int = 1) -> 
     rotated_path = _rotate_pdf(pdf_path, degrees)
     target_pdf = rotated_path or pdf_path
 
+    # ── 诊断日志：把每次打印的真相写出来，定位「改了没效果」──
+    def _pdf_dims(path):
+        try:
+            import fitz
+            d = fitz.open(path)
+            r = d[0].rect
+            rot = d[0].rotation
+            d.close()
+            return f"{round(r.width)}x{round(r.height)}pt rotation={rot}"
+        except Exception as ex:
+            return f"<读取失败: {ex}>"
+
+    print("=" * 60, flush=True)
+    print(f"[PRINT] sumatra    = {sumatra}", flush=True)
+    print(f"[PRINT] print_rotate(cfg) = {cfg.get('print_rotate')}  -> degrees={degrees}", flush=True)
+    print(f"[PRINT] 源PDF   {pdf_path}  ->  {_pdf_dims(pdf_path)}", flush=True)
+    print(f"[PRINT] 旋转后 rotated_path = {rotated_path}", flush=True)
+    if rotated_path:
+        print(f"[PRINT] 送打印 {target_pdf}  ->  {_pdf_dims(target_pdf)}", flush=True)
+    else:
+        print(f"[PRINT] 送打印 {target_pdf}  (未旋转，直接打源PDF)  ->  {_pdf_dims(target_pdf)}", flush=True)
+    print("=" * 60, flush=True)
+
     try:
         # 组装命令：静默打印
         if printer:
@@ -237,9 +275,18 @@ def print_pdf(pdf_path: str, printer: Optional[str] = None, copies: int = 1) -> 
         else:
             base = [sumatra, "-print-to-default", "-silent"]
         # noscale：1:1打印，不缩放。
-        # 旋转已在 PDF 页面层面完成（/Rotate），这里不再让 SumatraPDF/驱动
-        # 自行旋转，避免走纸长度被算错。
-        base += ["-print-settings", "noscale"]
+        # 旋转已在 PDF 页面层面完成（烤入式宽高互换），需显式告知 Windows 打印驱动
+        # 纸张方向，否则驱动默认竖向会把横版 PDF 旋回竖版再打。
+        # 根据送打 PDF 的实际宽高动态选 landscape / portrait，避免 print_rotate 调整后出错。
+        try:
+            import fitz as _fitz
+            _doc = _fitz.open(target_pdf)
+            _r = _doc[0].rect
+            _doc.close()
+            _orientation = "landscape" if _r.width > _r.height else "portrait"
+        except Exception:
+            _orientation = "landscape"  # 读取失败时保险默认横版
+        base += ["-print-settings", f"noscale,{_orientation}"]
         base += ["-exit-when-done", target_pdf]
 
         copies = max(1, int(copies or 1))
