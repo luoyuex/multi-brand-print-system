@@ -3,10 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <style>
-    /* 竖版 PDF = 140mm 宽 × 241mm 高，与自定义纸「python」(241×140)+纵向一致。
-       内容自然往下流：标题/日期/客户在上，商品行向下延伸（可放 ~40 行）。
-       不做任何 CSS 旋转、不裁切；SumatraPDF 用 noscale 按竖版比例纵向送，
-       与 WPS「python纸+纵向」打对的那份一致。 */
+    /* 一联记账凭证 = 241mm 宽 × 139.5mm 高（二联纸的半张，一联）。
+       241=两针孔之间(走纸宽度，锁死)，139.5=一联走纸长度(撕裂线之间)。
+       为了让行数更多，把内容排成一张「窄的竖表格」（读时纵向）：
+       内容画布 = 139.5mm 宽 × 241mm 高，表格沿 241mm 长边往下排，可放 ~40 行。
+       再用 CSS 整块旋转 90° 躺进 241×139.5 的物理页里。
+       PDF 页面保持 241×139.5 物理尺寸，1:1 送打印机；撕下这一联转 90° 即正着读。 */
     @page {
       size: {{ paper_width }}mm {{ paper_height }}mm;
       margin: 0;
@@ -20,12 +22,34 @@
       color: #000;
     }
 
-    /* 页面容器：竖版 140mm 宽 × 241mm 高，内容自然往下流。
-       左右各 8mm 避开两侧针孔，上下 6mm 留白。 */
+    /* html + body 都锁成物理页实际尺寸并裁掉溢出：旋转后的 .page 是 241mm 高的
+       绝对定位画布，若不约束，这个高盒子会撑出第二页。html/body 一起锁成
+       241×139.5 一页高、overflow:hidden，打印分页只按这一页算，杜绝第二页。 */
+    html {
+      width: {{ paper_width }}mm;    /* 241：物理页宽 */
+      height: {{ paper_height }}mm;  /* 139.5：物理页高 */
+      overflow: hidden;
+    }
+    body {
+      position: relative;
+      width: {{ paper_width }}mm;    /* 241：物理页宽 */
+      height: {{ paper_height }}mm;  /* 139.5：物理页高（一页高，杜绝第二页） */
+      overflow: hidden;
+    }
+
+    /* 页面容器：竖版内容画布 = 139.5mm 宽 × 241mm 高（读时纵向），
+       整块旋转 90° 贴进 241×139.5 的物理页。
+       画布上下边（8mm padding）旋转后对应物理纸左右的针孔边，避开针孔；
+       画布左右边（5mm padding）旋转后对应走纸/撕裂方向，无针孔。 */
     .page {
-      width: {{ paper_width }}mm;    /* 140：纸的短边（两针孔之间的窄向） */
-      min-height: {{ paper_height }}mm; /* 241：纸的长边（走纸方向） */
-      padding: 6mm 8mm;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: {{ paper_height }}mm;   /* 139.5：竖版画布的宽 = 纸的短边 */
+      height: {{ paper_width }}mm;   /* 241：竖版画布的高 = 纸的长边 */
+      padding: 8mm 5mm;
+      transform-origin: top left;
+      transform: translateY({{ paper_height }}mm) rotate(-90deg);
     }
 
     /* ── 品牌名（标题，居中于表格上方） ── */
@@ -140,9 +164,9 @@
         <td class="al-c">{{ item.spec or '' }}</td>
       </tr>
       {% endfor %}
-      {# 竖版一联（140 宽 × 241 高）：走纸方向 241mm 扣掉上下 12mm 后约 229mm（≈45 行），
-         表头+备注+总计固定占 5 行，商品行可放约 40 行。取 18 行填充，小单也铺得好看，
-         远未及一页上限，绝不换页。 #}
+      {# 横版一联（241 宽 × 139.5 高）：走纸方向 139.5mm 扣掉 60mm 顶边后仅约 79.5mm（≈15 行），
+         表头+备注+总计固定占 5 行，商品行最多约 10 行。取 9 行填充留安全余量，
+         保证小单也只出一页、不换页。 #}
       {% set min_rows = 18 %}
       {% if items|length < min_rows %}
       {% for i in range(min_rows - items|length) %}
