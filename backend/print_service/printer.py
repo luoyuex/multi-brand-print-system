@@ -179,9 +179,15 @@ def _set_form_length(printer_name: str, mm: float = 140.0) -> None:
 def _rotate_pdf(src_path: str, degrees: int) -> Optional[str]:
     """把 PDF 每一页旋转 degrees 度，写到新的临时文件，返回其路径。
 
-    用于「渲染保持 241x140 横版不变，打印时整体旋转 90°」的场景：
-    模板/PDF 不动，只把送去打印机的那一份转向，避免依赖 SumatraPDF/驱动
-    对页面方向的自动猜测（那会导致针式连续纸走纸长度错乱）。
+    用于「渲染出竖版 139.5x241，打印时整体旋转 90° 成横版 241x139.5」的场景。
+
+    关键：不能用 page.set_rotation()（那只写 /Rotate 标志位，页面真实尺寸
+    仍是竖版；SumatraPDF 用 noscale 打印时会忽略该标志位，按原始竖版内容打，
+    导致「PDF 阅读器里看着转好了、打出来方向却不对」）。
+
+    这里改用「烤入式旋转」：新建一个宽高互换的实体页（rotation=0），用
+    show_pdf_page(rotate=deg) 把源页真正画上去。这样 SumatraPDF 看到的就是
+    货真价实的横版页，noscale 打出来方向正确。
 
     degrees 为 0 或非法值时返回 None（表示无需旋转，直接打原文件）。
     旋转失败时返回 None，静默降级为打印原始 PDF。
@@ -194,14 +200,23 @@ def _rotate_pdf(src_path: str, degrees: int) -> Optional[str]:
         return None
 
     try:
-        doc = fitz.open(src_path)
-        for page in doc:
-            # set_rotation 是绝对角度；叠加当前已有旋转，避免覆盖
-            page.set_rotation((page.rotation + degrees) % 360)
+        src = fitz.open(src_path)
+        out = fitz.open()
+        swap = degrees in (90, 270)  # 90/270 度需要宽高互换
+        for page in src:
+            r = page.rect
+            if swap:
+                new_w, new_h = r.height, r.width
+            else:
+                new_w, new_h = r.width, r.height
+            new_page = out.new_page(width=new_w, height=new_h)
+            # 把源页内容旋转 degrees 度画到新页上（铺满整页）
+            new_page.show_pdf_page(new_page.rect, src, page.number, rotate=degrees)
         fd, rotated_path = tempfile.mkstemp(suffix=".pdf", prefix="print_rot_")
         os.close(fd)
-        doc.save(rotated_path)
-        doc.close()
+        out.save(rotated_path)
+        out.close()
+        src.close()
         return rotated_path
     except Exception:
         return None
@@ -239,6 +254,7 @@ def print_pdf(pdf_path: str, printer: Optional[str] = None, copies: int = 1) -> 
         # noscale：1:1打印，不缩放。
         # 旋转已在 PDF 页面层面完成（/Rotate），这里不再让 SumatraPDF/驱动
         # 自行旋转，避免走纸长度被算错。
+        # noscale：1:1不缩放。PDF 物理尺寸241×139.5横版，驱动自动识别方向。
         base += ["-print-settings", "noscale"]
         base += ["-exit-when-done", target_pdf]
 
