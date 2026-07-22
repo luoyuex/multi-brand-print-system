@@ -141,11 +141,36 @@
               </span>
               <span class="edit-spec">{{ item.spec }}</span>
               <el-input-number v-model="item.qty"   :min="0.01" :precision="2" size="small" style="width:110px;" />
-              <el-input-number v-model="item.price" :min="0"    :precision="2" size="small" style="width:110px;" />
-              <span class="edit-subtotal">¥{{ (item.qty * item.price).toFixed(2) }}</span>
+              <el-input-number v-model="item.price" :min="0"    :precision="2" size="small" style="width:110px;" :disabled="item.is_replacement" />
+              <span class="edit-subtotal">
+                <span v-if="item.is_replacement" class="replacement-sub">补发</span>
+                <span v-else>¥{{ (item.qty * item.price).toFixed(2) }}</span>
+              </span>
               <button class="del-btn" @click="editItems.splice(idx, 1)">
                 <el-icon><Delete /></el-icon>
               </button>
+            </div>
+            <!-- 新增商品：按订单所属品牌搜索选品后加入 -->
+            <div class="add-row">
+              <el-autocomplete
+                v-model="addKeyword"
+                :fetch-suggestions="fetchAddSuggestions"
+                placeholder="输入序号或品名搜索，回车加入"
+                value-key="label"
+                :trigger-on-focus="false"
+                class="add-search"
+                @select="onAddSelect"
+                @keyup.enter.native="handleAddEnter"
+              >
+                <template #default="{ item }">
+                  <span class="suggest-code">{{ item.code }}</span>
+                  <span>{{ item.name }}</span>
+                  <span class="suggest-meta">{{ item.spec }} ¥{{ item.price }}</span>
+                </template>
+              </el-autocomplete>
+              <el-input-number v-model="addQty" :min="0.01" :precision="2" size="small" style="width:110px;" />
+              <el-button size="small" type="primary" plain :disabled="!addSelected" @click="addEditItem(false)">加入</el-button>
+              <el-button size="small" type="warning" plain :disabled="!addSelected" @click="addEditItem(true)">补货</el-button>
             </div>
             <div class="edit-footer">
               <span class="edit-total">合计 ¥{{ editTotal }}</span>
@@ -162,7 +187,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
-import { orderApi, printApi } from '../api'
+import { orderApi, printApi, productApi } from '../api'
 
 function todayStr() {
   const d = new Date()
@@ -180,6 +205,12 @@ const editItems   = ref([])
 const saving      = ref(false)
 const printingId  = ref(null)
 const deletingId  = ref(null)
+
+// ── 编辑时新增商品 ──
+const editBrandId   = ref(null)   // 当前编辑订单所属品牌（商品搜索按品牌过滤）
+const addKeyword    = ref('')     // 搜索框文字
+const addSelected   = ref(null)   // 选中的商品
+const addQty        = ref(1)      // 新增数量
 
 // ── 打印机状态 ──
 const printerReady      = ref(true)
@@ -276,8 +307,58 @@ function toggleEdit(order) {
   }
   editingId.value = order.id
   editItems.value = order.items.map((i) => ({ ...i }))
+  editBrandId.value = order.brand_id
+  resetAddInputs()
   // 确保展开
   expandedIds.value = new Set([...expandedIds.value, order.id])
+}
+
+function resetAddInputs() {
+  addKeyword.value = ''
+  addSelected.value = null
+  addQty.value = 1
+}
+
+// 编辑时按订单所属品牌搜索商品（序号 / 品名），供 el-autocomplete 提示
+async function fetchAddSuggestions(query, cb) {
+  if (!editBrandId.value) return cb([])
+  try {
+    const list = await productApi.list({ brand_id: editBrandId.value, search: query })
+    cb(list.map((p) => ({ ...p, label: `${p.code} ${p.name}` })))
+  } catch { cb([]) }
+}
+
+function onAddSelect(item) {
+  addSelected.value = item
+  addKeyword.value = `${item.code} ${item.name}`
+}
+
+// 回车：纯数字当序号精确匹配，命中即加入（与录入页一致）
+async function handleAddEnter() {
+  const kw = addKeyword.value.trim()
+  if (!kw || !editBrandId.value) return
+  if (/^\d+$/.test(kw)) {
+    const list = await productApi.list({ brand_id: editBrandId.value, search: kw })
+    const exact = list.find((p) => p.code === kw)
+    if (exact) { addSelected.value = exact; addEditItem(false) }
+  }
+}
+
+// 把选中的商品加入编辑明细；补货行单价置 0（与录入页规则一致），加到列表末尾
+function addEditItem(asReplacement = false) {
+  if (!addSelected.value) { ElMessage.warning('请先选择商品'); return }
+  if (!addQty.value || addQty.value <= 0) { ElMessage.warning('请输入有效数量'); return }
+  const p = addSelected.value
+  editItems.value.push({
+    product_code: p.code,
+    product_name: p.name,
+    spec: p.spec || '',
+    qty: addQty.value,
+    price: asReplacement ? 0 : (Number(p.price) || 0),
+    manual_price: false,
+    is_replacement: asReplacement,
+  })
+  resetAddInputs()
 }
 
 async function saveEdit(orderId) {
@@ -598,6 +679,7 @@ onBeforeUnmount(() => {
 
 /* 补货标记 */
 .rep-tag { margin-left: 6px; }
+.replacement-sub { min-width: 72px; text-align: right; color: var(--color-warning); font-weight: 700; }
 .rep-cell { color: var(--color-warning); font-weight: 700; }
 
 /* ── 编辑行 ── */
@@ -629,6 +711,18 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 .del-btn:hover { opacity: 0.85; }
+
+/* 编辑时新增商品行 */
+.add-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0 4px;
+  flex-wrap: wrap;
+}
+.add-search { flex: 1; min-width: 160px; }
+.suggest-code { font-weight: 700; margin-right: 8px; color: #303133; }
+.suggest-meta { float: right; color: #909399; font-size: 12px; }
 
 .edit-footer {
   display: flex;

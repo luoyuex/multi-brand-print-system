@@ -12,6 +12,7 @@ class Brand(Base):
 
     products = relationship("Product", back_populates="brand")
     orders = relationship("Order", back_populates="brand")
+    stores = relationship("Store", back_populates="brand")
 
 
 class Store(Base):
@@ -19,11 +20,17 @@ class Store(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)      # 店铺名称
+    brand_id = Column(Integer, ForeignKey("brands.id"), nullable=True)  # 所属品牌（一店一品牌）
     contact = Column(String(50))                    # 联系人
     phone = Column(String(30))                      # 电话
     address = Column(String(200))                   # 地址
 
     orders = relationship("Order", back_populates="store")
+    brand = relationship("Brand", back_populates="stores")
+
+    @property
+    def brand_name(self):
+        return self.brand.name if self.brand else ""
 
 
 class Product(Base):

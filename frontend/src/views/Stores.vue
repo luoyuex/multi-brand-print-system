@@ -16,6 +16,12 @@
       <!-- 桌面/平板：表格 -->
       <el-table v-if="!isMobile" :data="stores" border stripe>
         <el-table-column prop="name" label="店铺名称" min-width="120" />
+        <el-table-column prop="brand_name" label="品牌" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.brand_name" size="small" effect="plain">{{ row.brand_name }}</el-tag>
+            <span v-else class="no-brand">未关联</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="contact" label="联系人" width="100" />
         <el-table-column prop="phone" label="电话" width="140" />
         <el-table-column prop="address" label="地址" min-width="160" show-overflow-tooltip />
@@ -31,7 +37,10 @@
       <div v-else class="store-list">
         <div v-for="s in stores" :key="s.id" class="store-card">
           <div class="sc-main">
-            <div class="sc-name">{{ s.name }}</div>
+            <div class="sc-name">
+              {{ s.name }}
+              <el-tag v-if="s.brand_name" size="small" effect="plain" class="sc-brand">{{ s.brand_name }}</el-tag>
+            </div>
             <div v-if="s.contact || s.phone" class="sc-meta">
               <span v-if="s.contact">👤 {{ s.contact }}</span>
               <span v-if="s.phone">📞 {{ s.phone }}</span>
@@ -57,6 +66,11 @@
         <el-form-item label="店铺名称" required>
           <el-input v-model="form.name" placeholder="如：张记水果店" />
         </el-form-item>
+        <el-form-item label="所属品牌" required>
+          <el-select v-model="form.brand_id" placeholder="选择品牌" style="width:100%;">
+            <el-option v-for="b in brands" :key="b.id" :label="b.name" :value="b.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="联系人">
           <el-input v-model="form.contact" placeholder="可选" />
         </el-form-item>
@@ -78,18 +92,22 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { storeApi } from '../api'
+import { storeApi, brandApi } from '../api'
 import { useBreakpoint } from '../composables/useBreakpoint'
 
 const { isMobile } = useBreakpoint()
 const stores = ref([])
+const brands = ref([])
 const filterSearch = ref('')
 const dialogVisible = ref(false)
 const editTarget = ref(null)
 const saving = ref(false)
-const form = ref({ name: '', contact: '', phone: '', address: '' })
+const form = ref({ name: '', brand_id: null, contact: '', phone: '', address: '' })
 
-onMounted(load)
+onMounted(async () => {
+  brands.value = await brandApi.list()
+  await load()
+})
 
 async function load() {
   stores.value = await storeApi.list({ search: filterSearch.value || undefined })
@@ -97,18 +115,20 @@ async function load() {
 
 function openAdd() {
   editTarget.value = null
-  form.value = { name: '', contact: '', phone: '', address: '' }
+  // 新店默认关联第一个品牌，减少漏选
+  form.value = { name: '', brand_id: brands.value[0]?.id ?? null, contact: '', phone: '', address: '' }
   dialogVisible.value = true
 }
 
 function openEdit(row) {
   editTarget.value = row
-  form.value = { name: row.name, contact: row.contact || '', phone: row.phone || '', address: row.address || '' }
+  form.value = { name: row.name, brand_id: row.brand_id ?? null, contact: row.contact || '', phone: row.phone || '', address: row.address || '' }
   dialogVisible.value = true
 }
 
 async function save() {
   if (!form.value.name.trim()) { ElMessage.warning('店铺名称不能为空'); return }
+  if (!form.value.brand_id) { ElMessage.warning('请选择所属品牌'); return }
   saving.value = true
   try {
     if (editTarget.value) {

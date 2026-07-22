@@ -8,8 +8,9 @@ router = APIRouter(prefix="/api/stores", tags=["stores"])
 
 
 @router.get("/", response_model=List[schemas.StoreOut])
-def list_stores(search: Optional[str] = None, db: Session = Depends(get_db)):
-    return crud.get_stores(db, search=search)
+def list_stores(search: Optional[str] = None, brand_id: Optional[int] = None,
+                db: Session = Depends(get_db)):
+    return crud.get_stores(db, search=search, brand_id=brand_id)
 
 
 @router.post("/", response_model=schemas.StoreOut, status_code=201)

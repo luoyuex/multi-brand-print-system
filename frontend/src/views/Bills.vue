@@ -68,6 +68,7 @@
               {{ bill.paid ? '已回款' : '未回款' }}
             </el-tag>
             <el-button size="small" type="primary" plain @click="openImage(bill)">🧾 小票</el-button>
+            <el-button size="small" plain @click="openEdit(bill)">✏️ 编辑</el-button>
             <el-button size="small" type="success" plain :loading="copyingId === bill.id" @click="copyBillImage(bill)">📋 复制</el-button>
             <el-button size="small" :type="bill.sent ? 'info' : 'warning'" plain :loading="sentBusy === bill.id" @click="toggleSent(bill)">
               {{ bill.sent ? '取消发送' : '标记已发送' }}
@@ -107,18 +108,19 @@
       </div>
     </el-card>
 
-    <!-- 生成账单弹窗 -->
-    <el-dialog v-model="genVisible" title="生成账单" width="560px">
+    <!-- 生成 / 编辑账单弹窗 -->
+    <el-dialog v-model="genVisible" :title="editId ? `编辑账单 #${editId}` : '生成账单'" width="560px">
       <div class="gen-form">
         <div class="gen-row">
           <span class="gen-label">客户</span>
-          <el-select v-model="genStoreId" placeholder="选择客户（店铺）" filterable style="flex:1;" @change="doPreview">
+          <el-select v-model="genStoreId" placeholder="选择客户（店铺）" filterable style="flex:1;" :disabled="!!editId" @change="doPreview">
             <el-option v-for="s in stores" :key="s.id" :value="s.id" :label="s.name">
               <span>{{ s.name }}</span>
               <span v-if="s.contact" style="float:right;color:#999;font-size:12px;">{{ s.contact }}</span>
             </el-option>
           </el-select>
         </div>
+        <div v-if="editId" class="gen-tip">编辑账单只能改账期和备注；改账期会按新账期重新汇总该客户的订单。</div>
         <div class="gen-row">
           <span class="gen-label">账期</span>
           <el-date-picker v-model="genStart" type="date" placeholder="起" value-format="YYYY-MM-DD" style="flex:1;min-width:0;" @change="doPreview" />
@@ -152,8 +154,8 @@
       </div>
       <template #footer>
         <el-button @click="genVisible = false">取消</el-button>
-        <el-button type="primary" :loading="creating" :disabled="!preview || preview.order_count === 0" @click="handleCreate">
-          确认生成
+        <el-button type="primary" :loading="creating" :disabled="!preview || preview.order_count === 0" @click="handleSubmit">
+          {{ editId ? '保存修改' : '确认生成' }}
         </el-button>
       </template>
     </el-dialog>
@@ -197,8 +199,9 @@ const sentBusy      = ref(null)
 const paidBusy      = ref(null)
 const genTodayLoading = ref(false)
 
-// ── 生成弹窗 ──
+// ── 生成 / 编辑弹窗 ──
 const genVisible     = ref(false)
+const editId         = ref(null)   // null=生成模式；非空=编辑该账单（改账期/备注）
 const stores         = ref([])
 const genStoreId     = ref(null)
 const genStart       = ref('')
@@ -271,16 +274,34 @@ async function loadBills() {
 }
 
 // ── 生成账单 ──
+function ensureStores() {
+  if (stores.value.length === 0) {
+    storeApi.list().then((list) => { stores.value = list }).catch(() => {})
+  }
+}
+
 function openGenerate() {
+  editId.value = null
   genStoreId.value = null
   genStart.value = todayStr()
   genEnd.value = todayStr()
   genNote.value = ''
   preview.value = null
   genVisible.value = true
-  if (stores.value.length === 0) {
-    storeApi.list().then((list) => { stores.value = list }).catch(() => {})
-  }
+  ensureStores()
+}
+
+// 编辑账单：锁定客户，账期/备注可改，预览带 bill_id（把本账单已认领的订单也算进来）
+function openEdit(bill) {
+  editId.value = bill.id
+  genStoreId.value = bill.store_id
+  genStart.value = bill.period_start
+  genEnd.value = bill.period_end
+  genNote.value = bill.note || ''
+  preview.value = null
+  genVisible.value = true
+  ensureStores()
+  doPreview()
 }
 
 async function doPreview() {
@@ -296,6 +317,7 @@ async function doPreview() {
       store_id: genStoreId.value,
       start: genStart.value,
       end: genEnd.value,
+      bill_id: editId.value || undefined,
     })
   } catch (e) {
     ElMessage.error(e.message)
@@ -304,16 +326,25 @@ async function doPreview() {
   }
 }
 
-async function handleCreate() {
+async function handleSubmit() {
   creating.value = true
   try {
-    await billApi.create({
-      store_id: genStoreId.value,
-      start: genStart.value,
-      end: genEnd.value,
-      note: genNote.value || null,
-    })
-    ElMessage.success('账单已生成')
+    if (editId.value) {
+      await billApi.update(editId.value, {
+        start: genStart.value,
+        end: genEnd.value,
+        note: genNote.value || null,
+      })
+      ElMessage.success('账单已更新')
+    } else {
+      await billApi.create({
+        store_id: genStoreId.value,
+        start: genStart.value,
+        end: genEnd.value,
+        note: genNote.value || null,
+      })
+      ElMessage.success('账单已生成')
+    }
     genVisible.value = false
     loadBills()
   } catch (e) {
@@ -577,6 +608,7 @@ onMounted(() => {
 .gen-form { display: flex; flex-direction: column; gap: 12px; }
 .gen-row { display: flex; align-items: center; gap: 8px; }
 .gen-label { width: 40px; flex-shrink: 0; color: #606266; font-size: 14px; }
+.gen-tip { margin: -4px 0 2px 48px; color: #e6a23c; font-size: 12px; line-height: 1.4; }
 .preview-panel {
   margin-top: 4px;
   border: 1px solid #e4e9f0;

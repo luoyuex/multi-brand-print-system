@@ -27,6 +27,9 @@ def _run_migrations():
         "order_items": [
             ("is_replacement", "ALTER TABLE order_items ADD COLUMN is_replacement TINYINT(1) NOT NULL DEFAULT 0"),
         ],
+        "stores": [
+            ("brand_id", "ALTER TABLE stores ADD COLUMN brand_id INT"),
+        ],
     }
     with engine.connect() as conn:
         for table, cols in migrations.items():
@@ -39,6 +42,11 @@ def _run_migrations():
                 if result.scalar() == 0:
                     conn.execute(text(ddl))
                     print(f"[migration] ALTER {table}.{col} — done")
+                    # 新增 stores.brand_id：把存量店铺默认关联到品牌 1（Miss）
+                    if table == "stores" and col == "brand_id":
+                        conn.execute(text(
+                            "UPDATE stores SET brand_id = 1 WHERE brand_id IS NULL"))
+                        print("[migration] backfill stores.brand_id = 1 — done")
         conn.commit()
 
 _run_migrations()

@@ -19,6 +19,7 @@ class BrandOut(BrandBase):
 # ── Store ──────────────────────────────────────────────
 class StoreBase(BaseModel):
     name: str
+    brand_id: Optional[int] = None   # 所属品牌（一店一品牌）
     contact: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
@@ -28,12 +29,14 @@ class StoreCreate(StoreBase):
 
 class StoreUpdate(BaseModel):
     name: Optional[str] = None
+    brand_id: Optional[int] = None
     contact: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
 
 class StoreOut(StoreBase):
     id: int
+    brand_name: Optional[str] = None   # 关联品牌名称（列表展示用）
     class Config:
         from_attributes = True
 
@@ -140,8 +143,16 @@ class BillPreviewIn(BaseModel):
     store_id: int
     start: date
     end: date
+    # 编辑账单改期时传入：预览时把「已属于本账单」的订单也算进来（否则被认领的订单看不到）
+    bill_id: Optional[int] = None
 
 class BillCreate(BillPreviewIn):
+    note: Optional[str] = None
+
+# 编辑账单：改账期（重算明细）/ 备注
+class BillUpdate(BaseModel):
+    start: date
+    end: date
     note: Optional[str] = None
 
 # 预览用的轻量明细行（未落库）

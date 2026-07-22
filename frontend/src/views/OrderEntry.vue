@@ -286,10 +286,7 @@ const submitting = ref(false)
 const searchRef = ref(null)
 
 onMounted(async () => {
-  await Promise.all([
-    brandStore.fetchBrands(),
-    storeApi.list().then((list) => { stores.value = list }),
-  ])
+  await brandStore.fetchBrands()
   // 优先从草稿恢复品牌；否则默认取第一个品牌
   const restoredId = orderStore.brandId
   if (restoredId && brandStore.brands.find((b) => b.id === restoredId)) {
@@ -298,13 +295,26 @@ onMounted(async () => {
   } else if (brandStore.currentBrand) {
     currentBrandId.value = brandStore.currentBrand.id
   }
+  // 店铺按当前品牌过滤（一店一品牌）
+  await loadStores(currentBrandId.value)
 })
 
-function onBrandChange(id) {
+// 按品牌拉取店铺；不传品牌则不请求（列表清空）
+async function loadStores(brandId) {
+  if (!brandId) { stores.value = []; return }
+  try {
+    stores.value = await storeApi.list({ brand_id: brandId })
+  } catch { stores.value = [] }
+}
+
+async function onBrandChange(id) {
   orderStore.brandId = id   // 同步到草稿
   brandStore.selectBrand(brandStore.brands.find((b) => b.id === id))
   selectedProduct.value = null
   searchKeyword.value = ''
+  // 切品牌：清空已选店铺（原店铺可能不属于新品牌），重新按品牌加载
+  orderStore.storeId = null
+  await loadStores(id)
 }
 
 async function fetchSuggestions(query, cb) {

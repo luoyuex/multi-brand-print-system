@@ -18,8 +18,10 @@ def create_brand(db: Session, brand: schemas.BrandCreate):
 
 
 # ── Store ──────────────────────────────────────────────
-def get_stores(db: Session, search: Optional[str] = None):
+def get_stores(db: Session, search: Optional[str] = None, brand_id: Optional[int] = None):
     q = db.query(models.Store)
+    if brand_id is not None:
+        q = q.filter(models.Store.brand_id == brand_id)
     if search:
         q = q.filter(
             or_(
@@ -175,14 +177,24 @@ def _iter_bill_lines(orders):
             yield order, it, qty, price, subtotal
 
 
-def get_unbilled_orders(db: Session, store_id: int, start: date, end: date):
-    """某客户账期区间内、尚未出账（bill_id 为空）的订单，按下单时间升序。"""
+def get_unbilled_orders(db: Session, store_id: int, start: date, end: date,
+                        include_bill_id: int = None):
+    """某客户账期区间内、尚未出账（bill_id 为空）的订单，按下单时间升序。
+
+    include_bill_id 用于编辑账单改期：把已被该账单认领的订单也算作「可用」，
+    否则改期预览/重算时看不到本账单原有的订单。
+    """
     s, e = _day_range(start, end)
+    if include_bill_id is not None:
+        avail = or_(models.Order.bill_id.is_(None),
+                    models.Order.bill_id == include_bill_id)
+    else:
+        avail = models.Order.bill_id.is_(None)
     return (
         _order_q(db)
         .filter(
             models.Order.store_id == store_id,
-            models.Order.bill_id.is_(None),
+            avail,
             models.Order.created_at >= s,
             models.Order.created_at < e,
         )
@@ -208,9 +220,11 @@ def get_unbilled_store_ids(db: Session, start: date, end: date):
     return [r[0] for r in rows]
 
 
-def preview_bill(db: Session, store_id: int, start: date, end: date):
+def preview_bill(db: Session, store_id: int, start: date, end: date,
+                 include_bill_id: int = None):
     """预览某客户某账期的未出账汇总（按天分组），不写库。"""
-    orders = get_unbilled_orders(db, store_id, start, end)
+    orders = get_unbilled_orders(db, store_id, start, end,
+                                 include_bill_id=include_bill_id)
     store = get_store(db, store_id)
     customer = store.name if store else (orders[0].customer if orders else "")
     brand_name = orders[0].brand_name if orders else ""
@@ -288,6 +302,63 @@ def create_bill(db: Session, store_id: int, start: date, end: date, note: str = 
     bill.total_amount = total
     for order in orders:
         order.bill_id = bill.id   # 认领，防重复出账
+
+    db.commit()
+    db.refresh(bill)
+    return bill
+
+
+def update_bill(db: Session, bill_id: int, start: date, end: date, note: str = None):
+    """编辑账单：按新账期重算明细（选错账期时改期用）。
+
+    账单是订单的快照，改期不能只动 period 字段，否则明细对不上。做法：
+    先释放本账单原认领的订单，再按新账期在「未出账 + 本账单原有」范围内重新
+    认领并重建明细快照。账单 id / created_at / sent / paid 状态全部保留。
+    新账期内没有任何订单则返回 "empty"（路由据此报 400，不动原账单）。
+    """
+    bill = db.query(models.Bill).filter(models.Bill.id == bill_id).first()
+    if not bill:
+        return None
+
+    orders = get_unbilled_orders(db, bill.store_id, start, end, include_bill_id=bill_id)
+    if not orders:
+        return "empty"
+
+    # 释放旧认领并清空旧明细快照
+    db.query(models.Order).filter(models.Order.bill_id == bill_id).update(
+        {models.Order.bill_id: None}, synchronize_session=False)
+    for it in list(bill.items):
+        db.delete(it)
+    db.flush()
+
+    store = get_store(db, bill.store_id)
+    bill.customer   = store.name if store else (orders[0].customer or bill.customer)
+    bill.brand_id   = orders[0].brand_id
+    bill.brand_name = orders[0].brand_name
+    bill.period_start = start
+    bill.period_end   = end
+    bill.order_count  = len(orders)
+    if note is not None:
+        bill.note = note
+
+    total = 0.0
+    for order, it, qty, price, subtotal in _iter_bill_lines(orders):
+        db.add(models.BillItem(
+            bill_id=bill.id,
+            order_id=order.id,
+            order_date=order.created_at.date(),
+            product_name=it.product_name,
+            spec=it.spec,
+            qty=qty,
+            price=price,
+            subtotal=subtotal,
+            is_replacement=bool(it.is_replacement),
+        ))
+        total += subtotal
+
+    bill.total_amount = total
+    for order in orders:
+        order.bill_id = bill.id   # 重新认领
 
     db.commit()
     db.refresh(bill)

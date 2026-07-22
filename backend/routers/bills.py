@@ -49,7 +49,8 @@ def preview_bill(data: schemas.BillPreviewIn, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="店铺不存在")
     if data.end < data.start:
         raise HTTPException(status_code=400, detail="结束日期不能早于起始日期")
-    return crud.preview_bill(db, data.store_id, data.start, data.end)
+    return crud.preview_bill(db, data.store_id, data.start, data.end,
+                             include_bill_id=data.bill_id)
 
 
 @router.post("/", response_model=schemas.BillOut, status_code=201)
@@ -82,6 +83,24 @@ def get_bill(bill_id: int, db: Session = Depends(get_db)):
     if not obj:
         raise HTTPException(status_code=404, detail="账单不存在")
     return obj
+
+
+@router.patch("/{bill_id}", response_model=schemas.BillOut)
+def update_bill(bill_id: int, data: schemas.BillUpdate, db: Session = Depends(get_db)):
+    """编辑账单：改账期（会释放原订单、按新账期重新认领并重算明细）/ 备注。
+
+    账单 id、发送/回款状态、生成时间保持不变。新账期内没有可用订单时报 400。
+    """
+    if not crud.get_bill(db, bill_id):
+        raise HTTPException(status_code=404, detail="账单不存在")
+    if data.end < data.start:
+        raise HTTPException(status_code=400, detail="结束日期不能早于起始日期")
+    bill = crud.update_bill(db, bill_id, data.start, data.end, data.note)
+    if bill is None:
+        raise HTTPException(status_code=404, detail="账单不存在")
+    if bill == "empty":
+        raise HTTPException(status_code=400, detail="新账期内没有可归入该客户的订单")
+    return crud.get_bill(db, bill_id)
 
 
 @router.patch("/{bill_id}/sent", response_model=schemas.BillOut)

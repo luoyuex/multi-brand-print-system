@@ -66,6 +66,8 @@ export const billApi = {
   preview:       (data)      => http.post('/bills/preview', data),
   // 生成账单（认领未出账订单）
   create:        (data)      => http.post('/bills/', data),
+  // 编辑账单：改账期（重算明细）/ 备注
+  update:        (id, data)  => http.patch(`/bills/${id}`, data),
   // 一键生成今日账单：每个有未出账订单的客户各出一张
   generateToday: ()          => http.post('/bills/generate-today'),
   markSent:      (id, value) => http.patch(`/bills/${id}/sent`, { value }),
