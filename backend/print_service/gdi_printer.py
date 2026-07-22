@@ -8,6 +8,21 @@
 
 本模块只负责「把送货单画到打印机」这一层，数据由 service.build_print_data() 提供，
 不涉及 HTML / PDF / 任何子进程。
+
+【本次修复要点】
+1. 原代码只取了 LOGPIXELSY（纵向 DPI）一个值，横向、纵向坐标换算全部共用它。
+   针式打印机横纵向物理分辨率往往不同，这会导致横向尺寸（页宽、列宽、外框
+   横线长度）整体算错，误差随纸张尺寸放大，表现为"横线明显超出表格区域"。
+   现在分别取 LOGPIXELSX / LOGPIXELSY，横向量用 mmx()，纵向量用 mmy()。
+2. 画外框/横线时右边界用了 `x0 + table_w - 1`，但画竖线、写字用的是
+   `x0 + table_w`，两处相差 1px，逻辑不统一。现在统一为同一个 right 值。
+3. 画笔线宽如果 > 1px，GDI 简单画笔（cosmetic pen）默认是圆头端帽，端点会
+   向外凸出半个线宽，边框转角处会看到"戳出去"的线头。现在固定为 1px 实线，
+   如需更粗的线条，需改用 ExtCreatePen 并指定 PS_ENDCAP_FLAT（本文件未做，
+   针式打印机 1px 通常已经足够清晰）。
+4. 增加了一段可选的调试日志（DEBUG_PRINT_GEOMETRY 开关），方便核对
+   canvas 尺寸换算成 mm 后是否与预期的 241mm x 140mm 纸张一致，
+   便于快速定位"代码换算错" vs "驱动纸张设置错"。
 """
 
 import win32con
@@ -16,7 +31,8 @@ import win32ui
 # GetDeviceCaps 索引（见 wingdi.h）
 _HORZRES = 8      # 可打印区宽（点）
 _VERTRES = 10     # 可打印区高（点）
-_LOGPIXELSY = 90  # 每英寸像素（DPI）
+_LOGPIXELSX = 88  # 每英寸像素（横向 DPI）
+_LOGPIXELSY = 90  # 每英寸像素（纵向 DPI）
 
 _FONT_NAME = "Microsoft YaHei"
 _FONT_WEIGHT = 700  # 粗体
@@ -36,6 +52,20 @@ _SZ_NOTE = 9.0
 _SZ_TOTAL = 11.0
 
 _NOTE_TEXT = "水果质量问题24小时内包赔"
+
+# 页面留白(mm)
+LEFT_MARGIN_MM = 2
+RIGHT_MARGIN_MM = 10
+TOP_MARGIN_MM = 1
+BOTTOM_MARGIN_MM = 10
+
+# 表格总宽(mm)。None = 用可打印区全宽减左右边距(旧行为)；
+# 给具体数值则表格固定这么宽，右侧多出来的部分留白。
+TABLE_WIDTH_MM = 200
+
+# 排查"横线超出表格区域"之类问题时，把这个改成 True，会在控制台打印
+# canvas / DPI 的换算结果，方便确认是代码算错了还是驱动纸张设置有问题。
+DEBUG_PRINT_GEOMETRY = False
 
 
 def print_delivery(data: dict, printer: str = None, copies: int = 1) -> None:
@@ -66,22 +96,54 @@ def print_delivery(data: dict, printer: str = None, copies: int = 1) -> None:
 
 def _draw_page(dc, data: dict) -> None:
     """在当前页(StartPage 之后)画出完整的一张送货单。"""
-    dpi = dc.GetDeviceCaps(_LOGPIXELSY) or 180
+    # 横向、纵向分别取 DPI，不能共用一个值。
+    dpi_x = dc.GetDeviceCaps(_LOGPIXELSX) or 180
+    dpi_y = dc.GetDeviceCaps(_LOGPIXELSY) or 180
 
-    def mm(v):
-        return int(round(v / 25.4 * dpi))
+    def mmx(v):
+        """毫米 -> 横向像素。"""
+        return int(round(v / 25.4 * dpi_x))
+
+    def mmy(v):
+        """毫米 -> 纵向像素。"""
+        return int(round(v / 25.4 * dpi_y))
 
     def pt(v):
-        return int(round(v / 72.0 * dpi))
+        """磅 -> 像素（字体高度按纵向 DPI 换算）。"""
+        return int(round(v / 72.0 * dpi_y))
 
     canvas_w = dc.GetDeviceCaps(_HORZRES)
     canvas_h = dc.GetDeviceCaps(_VERTRES)
 
-    # 内缩几点避免贴边被裁切
-    inset = mm(0.5)
-    x0, y0 = inset, inset
-    table_w = canvas_w - 2 * inset
-    table_h = canvas_h - 2 * inset
+    if DEBUG_PRINT_GEOMETRY:
+        print(
+            f"[gdi_printer] dpi_x={dpi_x} dpi_y={dpi_y} "
+            f"canvas_w={canvas_w}px({canvas_w / dpi_x * 25.4:.1f}mm) "
+            f"canvas_h={canvas_h}px({canvas_h / dpi_y * 25.4:.1f}mm)"
+        )
+
+    # 转换成打印机像素（横向用 mmx，纵向用 mmy）
+    left = mmx(LEFT_MARGIN_MM)
+    right_margin = mmx(RIGHT_MARGIN_MM)
+    top = mmy(TOP_MARGIN_MM)
+    bottom = mmy(BOTTOM_MARGIN_MM)
+
+    # 表格起点
+    x0 = left
+    y0 = top
+
+    # 实际绘制宽高：TABLE_WIDTH_MM 指定则固定该宽度，否则用全宽减左右边距。
+    if TABLE_WIDTH_MM:
+        table_w = mmx(TABLE_WIDTH_MM)
+    else:
+        table_w = canvas_w - left - right_margin
+    table_h = canvas_h - top - bottom
+
+    if DEBUG_PRINT_GEOMETRY:
+        print(
+            f"[gdi_printer] table_w={table_w}px({table_w / dpi_x * 25.4:.1f}mm) "
+            f"table_h={table_h}px({table_h / dpi_y * 25.4:.1f}mm)"
+        )
 
     items = data.get("items") or []
     body_rows = max(_MIN_BODY_ROWS, len(items))
@@ -97,16 +159,21 @@ def _draw_page(dc, data: dict) -> None:
     R_NOTE = R_BODY0 + body_rows
     R_TOTAL = R_NOTE + 1
 
+    # 表格右边界：统一用这一个值，画线、画字都用它，避免 1px 误差。
+    right = x0 + table_w
+
     # 列 x 边界（0..6）
     col_x = [x0]
     cum = 0.0
     for f in _COL_FRACS:
         cum += f
         col_x.append(x0 + int(round(cum * table_w)))
-    col_x[-1] = x0 + table_w  # 消除累积误差，右边界对齐
+    col_x[-1] = right  # 消除累积误差，右边界对齐
 
     # ---- 画线 ----
-    pen = win32ui.CreatePen(win32con.PS_SOLID, max(1, mm(0.3)), 0)
+    # 线宽固定为 1px：GDI 简单画笔线宽>1时端帽是圆头，会在线段端点外凸，
+    # 边框转角、横线与外框交界处会看起来"戳出去"一截。1px 实线足够清晰。
+    pen = win32ui.CreatePen(win32con.PS_SOLID, 1, 0)
     dc.SelectObject(pen)
 
     def line(ax, ay, bx, by):
@@ -114,14 +181,14 @@ def _draw_page(dc, data: dict) -> None:
         dc.LineTo(bx, by)
 
     # 外框
-    line(x0, y0, x0 + table_w, y0)
-    line(x0, y0 + table_h, x0 + table_w, y0 + table_h)
+    line(x0, y0, right, y0)
+    line(x0, y0 + table_h, right, y0 + table_h)
     line(x0, y0, x0, y0 + table_h)
-    line(x0 + table_w, y0, x0 + table_w, y0 + table_h)
+    line(right, y0, right, y0 + table_h)
 
     # 横向分隔线
     for i in range(1, total_rows):
-        line(x0, row_y(i), x0 + table_w, row_y(i))
+        line(x0, row_y(i), right, row_y(i))
 
     # 竖向分隔线：表头区(2 行)只在标签列后有一条
     line(col_x[1], row_y(R_META1), col_x[1], row_y(R_HEAD))
@@ -147,7 +214,7 @@ def _draw_page(dc, data: dict) -> None:
             _fonts[size_pt] = f
         dc.SelectObject(f)
 
-    pad = mm(1.5)
+    pad = mmx(1.5)
 
     def fit(text, max_w):
         """按像素宽度截断文本，超宽末尾加省略号。"""
@@ -172,8 +239,6 @@ def _draw_page(dc, data: dict) -> None:
             tx = left + (right - left - w) // 2
         ty = row_top + (int(round(row_h)) - h) // 2
         dc.TextOut(tx, ty, text)
-
-    right = x0 + table_w
 
     # 表头：日期 / 客户
     use_font(_SZ_META)

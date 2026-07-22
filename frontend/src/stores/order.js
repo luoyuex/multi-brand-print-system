@@ -32,23 +32,33 @@ export const useOrderStore = defineStore('order', () => {
     }))
   }, { deep: true })
 
-  function addItem(product, qty = 1) {
-    const existingIdx = items.value.findIndex((i) => i.product_code === product.code)
+  function addItem(product, qty = 1, asReplacement = false) {
+    // 仅合并「补货状态相同」的同款商品，
+    // 允许同一商品同时存在「正常售卖行」和「补货行」
+    const existingIdx = items.value.findIndex(
+      (i) => i.product_code === product.code && !!i.is_replacement === asReplacement
+    )
     if (existingIdx !== -1) {
       const [existing] = items.value.splice(existingIdx, 1)
       existing.qty += qty
       items.value.unshift(existing)
-    } else {
-      items.value.unshift({
-        product_code:  product.code,
-        product_name:  product.name,
-        spec:          product.spec,
-        qty,
-        price:         product.price,
-        manual_price:  false,
-        is_replacement: false,
-      })
+      return
     }
+    const item = {
+      product_code:  product.code,
+      product_name:  product.name,
+      spec:          product.spec,
+      qty,
+      price:         product.price,
+      manual_price:  false,
+      is_replacement: asReplacement,
+    }
+    if (asReplacement) {
+      // 补货：记住原价，单价归 0（坏损免费补发）
+      item.orig_price = product.price
+      item.price      = 0
+    }
+    items.value.unshift(item)
   }
 
   function updateItem(index, field, value) {

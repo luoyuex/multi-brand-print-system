@@ -75,7 +75,7 @@
             :step="1"
             placeholder="数量"
             style="width:100%;"
-            @keyup.enter.native="addToOrder"
+            @keyup.enter.native="addToOrder()"
           />
         </el-col>
         <el-col :xs="10" :sm="4" :md="5">
@@ -83,9 +83,22 @@
             type="primary"
             style="width:100%;"
             :disabled="!selectedProduct"
-            @click="addToOrder"
+            @click="addToOrder()"
           >
             {{ isMobile ? '加入' : '加入订单 ↵' }}
+          </el-button>
+        </el-col>
+      </el-row>
+      <el-row :gutter="10" class="mobile-row" style="margin-top:8px;">
+        <el-col :span="24">
+          <el-button
+            type="warning"
+            plain
+            style="width:100%;"
+            :disabled="!selectedProduct"
+            @click="addAsReplacement"
+          >
+            作为补货加入（坏损免费补发）
           </el-button>
         </el-col>
       </el-row>
@@ -108,7 +121,16 @@
             <el-tag v-if="row.is_replacement" type="warning" size="small" effect="dark" style="margin-left:6px;">补</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="spec" label="规格" width="72" />
+        <el-table-column label="规格" width="110">
+          <template #default="{ row, $index }">
+            <el-input
+              v-model="row.spec"
+              size="small"
+              placeholder="规格"
+              @change="(v) => orderStore.updateItem($index, 'spec', v)"
+            />
+          </template>
+        </el-table-column>
         <el-table-column label="数量" width="118">
           <template #default="{ row, $index }">
             <el-input-number
@@ -166,12 +188,21 @@
           <div class="item-header">
             <span class="item-name">{{ item.product_name }}</span>
             <el-tag v-if="item.is_replacement" type="warning" size="small" effect="dark" class="rep-tag">补</el-tag>
-            <span class="item-spec">{{ item.spec }}</span>
             <button class="item-delete" @click="orderStore.removeItem(index)">
               <el-icon><Delete /></el-icon>
             </button>
           </div>
           <div class="item-body">
+            <div class="item-field">
+              <span class="field-label">规格</span>
+              <el-input
+                v-model="item.spec"
+                size="small"
+                placeholder="规格"
+                style="width:90px;"
+                @change="(v) => orderStore.updateItem(index, 'spec', v)"
+              />
+            </div>
             <div class="item-field">
               <span class="field-label">数量</span>
               <el-input-number
@@ -299,14 +330,18 @@ async function handleEnter() {
   }
 }
 
-function addToOrder() {
+function addToOrder(asReplacement = false) {
   if (!selectedProduct.value) { ElMessage.warning('请先选择商品'); return }
   if (!inputQty.value || inputQty.value <= 0) { ElMessage.warning('请输入有效数量'); return }
-  orderStore.addItem(selectedProduct.value, inputQty.value)
+  orderStore.addItem(selectedProduct.value, inputQty.value, asReplacement)
   selectedProduct.value = null
   searchKeyword.value = ''
   inputQty.value = 1
   searchRef.value?.focus()
+}
+
+function addAsReplacement() {
+  addToOrder(true)
 }
 
 async function submitOrder() {
