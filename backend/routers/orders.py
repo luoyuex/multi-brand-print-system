@@ -70,9 +70,9 @@ def update_order(order_id: int, data: schemas.OrderUpdate, db: Session = Depends
 
 @router.post("/{order_id}/print", response_model=schemas.OrderOut)
 def print_order(order_id: int, db: Session = Depends(get_db)):
-    """静默打印订单：渲染 → 打印机出纸，成功后才标记已打印。
+    """静默打印订单：GDI 直接绘制送货单 → 打印机出纸，成功后才标记已打印。
 
-    打印服务异常（未装 SumatraPDF / 打印机离线等）返回 502，前端提示，
+    打印服务异常（打印机离线 / 缺纸等）返回 502，前端提示，
     订单状态保持不变，可重试。
     """
     order = crud.get_order(db, order_id)
@@ -81,7 +81,7 @@ def print_order(order_id: int, db: Session = Depends(get_db)):
 
     data = service.build_print_data(order)
     try:
-        service.submit("delivery_a5", data)
+        service.submit(data)
     except Exception as e:
         import traceback; traceback.print_exc()
         raise HTTPException(status_code=502, detail=f"打印失败：{type(e).__name__}: {repr(e)}")

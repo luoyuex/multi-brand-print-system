@@ -2,7 +2,7 @@
 
 - GET  /api/print/printers  枚举系统打印机 + 默认打印机
 - GET  /api/print/config    读取打印配置
-- PUT  /api/print/config    更新打印配置（默认打印机 / 纸张 / 份数 / SumatraPDF 路径）
+- PUT  /api/print/config    更新打印配置（默认打印机 / 份数）
 - POST /api/print/test      打印测试页
 """
 
@@ -24,16 +24,12 @@ router = APIRouter(prefix="/api/print", tags=["print"])
 
 class PrintConfigOut(BaseModel):
     default_printer: str
-    paper_size: str
     copies: int
-    sumatra_path: str
 
 
 class PrintConfigUpdate(BaseModel):
     default_printer: Optional[str] = None
-    paper_size: Optional[str] = None
     copies: Optional[int] = None
-    sumatra_path: Optional[str] = None
 
 
 class PrintersOut(BaseModel):

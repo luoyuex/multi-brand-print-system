@@ -62,17 +62,6 @@ app.include_router(print_router.router)
 app.include_router(bills.router)
 
 
-@app.on_event("startup")
-def _init_print_service():
-    """预初始化 Playwright 浏览器实例，避免首次打印时冷启动延迟。"""
-    from print_service.renderer import ensure_initialized
-    try:
-        ensure_initialized()
-        print("[startup] Playwright 浏览器实例已初始化")
-    except Exception as e:
-        print(f"[startup] Playwright 初始化失败（首次打印时会重试）：{e}")
-
-
 @app.on_event("shutdown")
 def _shutdown_print_service():
     from print_service import service

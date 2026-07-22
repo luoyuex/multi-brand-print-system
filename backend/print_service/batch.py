@@ -92,7 +92,7 @@ def _set_item(batch, order_id, **fields):
     batch.bump()
 
 
-def _worker(batch, template):
+def _worker(batch):
     """后台线程：串行处理批量里的每一张订单。"""
     # worker 线程内用独立 DB session，避免跨线程复用请求级 session。
     from database import SessionLocal
@@ -100,7 +100,6 @@ def _worker(batch, template):
 
     s = service.resolve_print_settings(printer_name=batch.printer_name)
     printer_name = s["printer_name"]
-    paper_size = s["paper_size"]
     copies = s["copies"]
 
     db = SessionLocal()
@@ -125,8 +124,7 @@ def _worker(batch, template):
             try:
                 # 与单打共用同一把锁，全局串行；打印后等出纸完成再放下一单。
                 with service.print_lock:
-                    service.render_and_print(template, data, paper_size,
-                                             printer_name, copies)
+                    service.render_and_print(data, printer_name, copies)
                     printer.wait_until_idle(printer_name,
                                             timeout=_WAIT_IDLE_TIMEOUT)
             except Exception as e:
@@ -146,7 +144,7 @@ def _worker(batch, template):
         batch.bump()
 
 
-def start_batch(orders, printer_name=None, template="delivery_a5"):
+def start_batch(orders, printer_name=None):
     """创建批量任务并启动后台 worker。
 
     orders: [{order_id, customer, brand_name}, ...]，调用方（路由）从 DB 查好传入，
@@ -167,7 +165,7 @@ def start_batch(orders, printer_name=None, template="delivery_a5"):
     with _lock:
         _batches[batch_id] = batch
 
-    t = threading.Thread(target=_worker, args=(batch, template),
+    t = threading.Thread(target=_worker, args=(batch,),
                          name=f"print-batch-{batch_id[:8]}", daemon=True)
     t.start()
     return batch.snapshot()
