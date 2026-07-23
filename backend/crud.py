@@ -65,12 +65,18 @@ def get_products(db: Session, brand_id: Optional[int] = None, search: Optional[s
     if brand_id:
         q = q.filter(models.Product.brand_id == brand_id)
     if search:
-        q = q.filter(
-            or_(
-                models.Product.code.like(f"%{search}%"),
-                models.Product.name.like(f"%{search}%"),
+        kw = search.strip()
+        if kw.isdigit():
+            # 纯数字视为序号：精准匹配 code（输入 1 只找 1，不找 11）
+            q = q.filter(models.Product.code == kw)
+        else:
+            # 含字母/汉字视为品名：模糊匹配 name 或 code
+            q = q.filter(
+                or_(
+                    models.Product.code.like(f"%{kw}%"),
+                    models.Product.name.like(f"%{kw}%"),
+                )
             )
-        )
     return q.order_by(models.Product.code).all()
 
 def get_product(db: Session, product_id: int):

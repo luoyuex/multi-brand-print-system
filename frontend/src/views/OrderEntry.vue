@@ -69,6 +69,7 @@
         </el-col>
         <el-col :xs="14" :sm="6" :md="5">
           <el-input-number
+            ref="qtyRef"
             v-model="inputQty"
             :min="0.01"
             :precision="2"
@@ -280,10 +281,16 @@ const orderStore = useOrderStore()
 const currentBrandId = ref(null)
 const stores = ref([])
 const searchKeyword = ref('')
-const inputQty = ref(1)
+const inputQty = ref(null)
 const selectedProduct = ref(null)
 const submitting = ref(false)
 const searchRef = ref(null)
+const qtyRef = ref(null)
+
+// 选中商品后聚焦数量输入框，方便直接录数量
+function focusQty() {
+  qtyRef.value?.focus?.()
+}
 
 onMounted(async () => {
   await brandStore.fetchBrands()
@@ -328,6 +335,7 @@ async function fetchSuggestions(query, cb) {
 function onProductSelect(item) {
   selectedProduct.value = item
   searchKeyword.value = `${item.code} ${item.name}`
+  focusQty()
 }
 
 async function handleEnter() {
@@ -336,7 +344,7 @@ async function handleEnter() {
   if (/^\d+$/.test(kw)) {
     const list = await productApi.list({ brand_id: currentBrandId.value, search: kw })
     const exact = list.find((p) => p.code === kw)
-    if (exact) { selectedProduct.value = exact; addToOrder() }
+    if (exact) { selectedProduct.value = exact; focusQty() }
   }
 }
 
@@ -346,7 +354,7 @@ function addToOrder(asReplacement = false) {
   orderStore.addItem(selectedProduct.value, inputQty.value, asReplacement)
   selectedProduct.value = null
   searchKeyword.value = ''
-  inputQty.value = 1
+  inputQty.value = null
   searchRef.value?.focus()
 }
 

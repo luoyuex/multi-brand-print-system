@@ -59,8 +59,7 @@ const props = defineProps({
 const WEEK = ['日', '一', '二', '三', '四', '五', '六']
 
 function money(v) {
-  const f = Number(v || 0)
-  return Number.isInteger(f) ? String(f) : f.toFixed(2)
+  return String(Math.round(Number(v || 0)))
 }
 function fmtQty(v) {
   const f = Number(v || 0)

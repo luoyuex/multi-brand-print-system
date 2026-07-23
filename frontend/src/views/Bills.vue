@@ -237,8 +237,7 @@ const unpaidTotal = computed(() =>
 )
 
 function money(v) {
-  const f = Number(v || 0)
-  return Number.isInteger(f) ? String(f) : f.toFixed(2)
+  return String(Math.round(Number(v || 0)))
 }
 function fmtQty(v) {
   const f = Number(v || 0)
