@@ -8,20 +8,19 @@
 - PATCH  /api/bills/{id}/sent       标记/取消「已发送客户」
 - PATCH  /api/bills/{id}/paid       标记/取消「已回款」
 - DELETE /api/bills/{id}            删除账单（释放订单可重新出账）
-- GET    /api/bills/{id}/image      渲染外卖小票风格 PNG
+
+账单小票图片改由前端 html2canvas 生成（见 frontend BillReceipt.vue），后端不再出图。
 """
 
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 import crud
 import schemas
 from database import get_db
-from print_service import service
 
 router = APIRouter(prefix="/api/bills", tags=["bills"])
 
@@ -125,21 +124,3 @@ def delete_bill(bill_id: int, db: Session = Depends(get_db)):
     if not obj:
         raise HTTPException(status_code=404, detail="账单不存在")
     return None
-
-
-@router.get("/{bill_id}/image")
-def get_bill_image(bill_id: int, db: Session = Depends(get_db)):
-    """把账单渲染成外卖小票风格 PNG 返回（前端 <img> 直接展示 / 下载）。"""
-    obj = crud.get_bill(db, bill_id)
-    if not obj:
-        raise HTTPException(status_code=404, detail="账单不存在")
-    try:
-        png = service.render_bill_image(obj)
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        raise HTTPException(status_code=502, detail=f"账单图片生成失败：{type(e).__name__}: {repr(e)}")
-    return Response(
-        content=png,
-        media_type="image/png",
-        headers={"Content-Disposition": f"inline; filename=bill_{bill_id}.png"},
-    )

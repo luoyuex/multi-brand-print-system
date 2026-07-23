@@ -73,8 +73,5 @@ export const billApi = {
   markSent:      (id, value) => http.patch(`/bills/${id}/sent`, { value }),
   markPaid:      (id, value) => http.patch(`/bills/${id}/paid`, { value }),
   remove:        (id)        => http.delete(`/bills/${id}`),
-  // 小票图片直链：<img :src> 用；带 t 参数在标记状态变化后强制刷新
-  imageUrl:      (id, t)     => `/api/bills/${id}/image${t ? `?t=${t}` : ''}`,
-  // 下载 PNG：走 axios 拿 blob，前端另存为带客户/账期的文件名
-  downloadImage: (id)        => http.get(`/bills/${id}/image`, { responseType: 'blob' }),
+  // 小票图片改为前端用 html2canvas 生成（见 BillReceipt.vue），不再走后端渲染
 }

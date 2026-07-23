@@ -3,16 +3,14 @@
 对外暴露 submit() 与 print_test()。
 
 送货单走 gdi_printer：pywin32 直接在打印机 DC 上绘制，方向和走纸由代码定死
-（背景见 docs/gdi-print-plan.md）。账单小票仍走 renderer 的 Playwright 截图路径。
+（背景见 docs/gdi-print-plan.md）。账单小票图片改由前端 html2canvas 生成，后端不再渲染。
 
 打印任务用一把 threading.Lock 串行化，保证不并发（针式连续纸不能并发送纸）。
 """
 
-import os
-import tempfile
 import threading
 
-from . import config, renderer, gdi_printer
+from . import config, gdi_printer
 
 
 def build_print_data(order) -> dict:
@@ -59,90 +57,6 @@ def build_print_data(order) -> dict:
         "total": round(total),
     }
 
-
-def build_bill_render_data(bill) -> dict:
-    """把账单模型（models.Bill）转成小票模板 bill.html 所需的数据，按天分组。
-
-    - 明细已在出账时快照进 bill.items（含补货免费规则），这里只做展示格式化；
-    - 数量整数去尾；金额是整数则不显示小数尾巴，更像小票；
-    - 单天账单不显示每日小计，多天账单每天一段并带当日小计。
-    """
-    def fmt_qty(q):
-        f = float(q or 0)
-        return int(f) if f == int(f) else round(f, 2)
-
-    def money(v):
-        f = float(v or 0)
-        return str(int(f)) if f == int(f) else f"{f:.2f}"
-
-    weekdays = ["一", "二", "三", "四", "五", "六", "日"]
-
-    days = {}   # date -> 分组；bill.items 落库时按订单时间顺序写入，天然有序
-    total = 0.0
-    for it in bill.items:
-        d = it.order_date
-        key = d.isoformat() if d else "-"
-        day = days.setdefault(key, {"date": d, "items": [], "subtotal": 0.0})
-        sub = float(it.subtotal or 0)
-        day["items"].append({
-            "product_name": it.product_name or "",
-            "spec": it.spec or "",
-            "qty_str": str(fmt_qty(it.qty)),
-            "price_str": money(it.price),
-            "subtotal_str": money(sub),
-            "is_replacement": bool(it.is_replacement),
-        })
-        day["subtotal"] += sub
-        total += sub
-
-    day_list = []
-    for d in days.values():
-        dt = d["date"]
-        day_list.append({
-            "date_str": dt.strftime("%m-%d") if dt else "",
-            "weekday": weekdays[dt.weekday()] if dt else "",
-            "count": len(d["items"]),
-            "lines": d["items"],   # 用 lines 命名，避开 Jinja 里 day.items 撞 dict.items 方法名
-            "subtotal_str": money(d["subtotal"]),
-        })
-
-    ps, pe = bill.period_start, bill.period_end
-    created = bill.created_at
-    return {
-        "brand_name": bill.brand_name or "",
-        "customer": bill.customer or "",
-        "bill_id": bill.id,
-        "period_start": ps.strftime("%Y-%m-%d") if ps else "",
-        "period_end": pe.strftime("%Y-%m-%d") if pe else "",
-        "single_day": ps == pe,
-        "order_count": bill.order_count,
-        "days": day_list,
-        "total_str": money(total),
-        "paid": bool(bill.paid),
-        "generated_at": created.strftime("%Y-%m-%d %H:%M") if created else "",
-    }
-
-
-def render_bill_image(bill) -> bytes:
-    """渲染账单小票为 PNG 字节流（供路由以 image/png 返回）。
-
-    走 renderer.html_to_image（独立 Playwright 子进程截图），不经过打印机、
-    不占用 print_lock，各请求独立互不影响。
-    """
-    data = build_bill_render_data(bill)
-    html = renderer.render_html("bill", data)
-
-    fd, img_path = tempfile.mkstemp(suffix=".png", prefix="bill_")
-    os.close(fd)
-    try:
-        renderer.html_to_image(html, img_path)
-        with open(img_path, "rb") as f:
-            return f.read()
-    finally:
-        try:
-            os.remove(img_path)
-        except OSError:
-            pass
 
 # 串行锁：保证打印任务不并发（单打接口与一键批量打印共用同一把锁，
 # 避免两条路径同时往打印机送任务导致针式连续纸走纸错乱）。
@@ -202,5 +116,5 @@ def print_test(printer_name: str = None) -> dict:
 
 
 def shutdown() -> None:
-    """应用退出时清理：关闭 Playwright。"""
-    renderer.shutdown()
+    """应用退出时清理：GDI 直接打印无需清理，保留接口兼容 main.py 的 shutdown 钩子。"""
+    pass

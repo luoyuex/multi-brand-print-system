@@ -160,24 +160,35 @@
       </template>
     </el-dialog>
 
-    <!-- 小票预览弹窗 -->
+    <!-- 小票预览弹窗：前端用 BillReceipt 组件渲染，html2canvas 截图成 PNG -->
     <el-dialog v-model="imgVisible" title="账单小票" width="480px" class="img-dialog">
       <div class="img-wrap">
-        <img v-if="imgBill" :src="billApi.imageUrl(imgBill.id, imgTs)" alt="账单小票" class="bill-img" />
+        <div v-if="imgBill" ref="receiptRef" class="receipt-holder">
+          <BillReceipt :bill="imgBill" />
+        </div>
       </div>
       <template #footer>
         <el-button @click="imgVisible = false">关闭</el-button>
-        <el-button @click="downloadBillImage(imgBill)">下载图片</el-button>
+        <el-button :loading="downloading" @click="downloadBillImage">下载图片</el-button>
         <el-button type="primary" :loading="copyingId === (imgBill && imgBill.id)" @click="copyBillImage(imgBill)">📋 复制图片</el-button>
       </template>
     </el-dialog>
+
+    <!-- 卡片「复制」用的离屏渲染容器：不开弹窗也能截图 -->
+    <div class="offscreen-receipt" aria-hidden="true">
+      <div v-if="offscreenBill" ref="offscreenRef">
+        <BillReceipt :bill="offscreenBill" />
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import html2canvas from 'html2canvas'
 import { billApi, storeApi } from '../api'
+import BillReceipt from '../components/BillReceipt.vue'
 
 function todayStr() {
   const d = new Date()
@@ -212,10 +223,13 @@ const previewLoading = ref(false)
 const creating       = ref(false)
 
 // ── 小票弹窗 ──
-const imgVisible = ref(false)
-const imgBill    = ref(null)
-const imgTs      = ref(0)
-const copyingId  = ref(null)   // 正在复制图片的账单 id（卡片/弹窗共用）
+const imgVisible   = ref(false)
+const imgBill      = ref(null)
+const receiptRef   = ref(null)   // 弹窗内小票 DOM，供截图
+const offscreenRef = ref(null)   // 卡片「复制」用的离屏小票 DOM
+const offscreenBill = ref(null)
+const downloading  = ref(false)
+const copyingId    = ref(null)   // 正在复制图片的账单 id（卡片/弹窗共用）
 
 const unpaidCount = computed(() => bills.value.filter((b) => !b.paid).length)
 const unpaidTotal = computed(() =>
@@ -427,35 +441,72 @@ async function handleDelete(bill) {
   }
 }
 
-// ── 小票图片 ──
+// ── 小票图片（前端用 html2canvas 从 BillReceipt 组件截图，不再走后端）──
+
+// 把指定 DOM 截成 PNG Blob。scale=2 更清晰，背景填白避免透明。
+async function captureBlob(el) {
+  const canvas = await html2canvas(el, {
+    scale: 2,
+    backgroundColor: '#ffffff',
+    useCORS: true,
+    logging: false,
+  })
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      blob ? resolve(blob) : reject(new Error('图片生成失败'))
+    }, 'image/png')
+  })
+}
+
+function fileName(bill) {
+  const period = bill.period_start === bill.period_end
+    ? bill.period_start
+    : `${bill.period_start}_${bill.period_end}`
+  return `对账单_${bill.customer}_${period}.png`
+}
+
 function openImage(bill) {
   imgBill.value = bill
-  imgTs.value = Date.now()   // 防缓存，标记状态变化后重开能刷新已收款戳
   imgVisible.value = true
 }
 
-async function downloadBillImage(bill) {
-  if (!bill) return
+// 弹窗里下载：截当前预览的小票 DOM
+async function downloadBillImage() {
+  const bill = imgBill.value
+  if (!bill || !receiptRef.value) return
+  downloading.value = true
   try {
-    const blob = await billApi.downloadImage(bill.id)
+    const blob = await captureBlob(receiptRef.value)
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    const period = bill.period_start === bill.period_end
-      ? bill.period_start
-      : `${bill.period_start}_${bill.period_end}`
     a.href = url
-    a.download = `对账单_${bill.customer}_${period}.png`
+    a.download = fileName(bill)
     document.body.appendChild(a)
     a.click()
     a.remove()
     URL.revokeObjectURL(url)
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    downloading.value = false
   }
 }
 
+// 拿到某账单小票的截图 DOM：弹窗打开且是同一张就用弹窗里的，否则用离屏容器渲染
+async function receiptElFor(bill) {
+  if (imgVisible.value && imgBill.value?.id === bill.id && receiptRef.value) {
+    return receiptRef.value
+  }
+  offscreenBill.value = bill
+  await nextTick()
+  // 等一帧让布局/字体稳定，避免截到未排版好的内容
+  await new Promise((r) => requestAnimationFrame(() => r()))
+  return offscreenRef.value
+}
+
 // 把小票 PNG 写入系统剪贴板，之后在聊天窗口 Ctrl+V 直接发（省去下载）。
-// 需要安全上下文：https 或 localhost；用 ClipboardItem 的 Promise 形式保留用户手势。
+// 需要安全上下文：https 或 localhost。html2canvas 是异步的，拿不到用户手势，
+// 所以先截图得到 blob，再 clipboard.write（现代浏览器允许紧接手势后的异步写入）。
 async function copyBillImage(bill) {
   if (!bill) return
   if (!navigator.clipboard || !window.ClipboardItem) {
@@ -464,18 +515,16 @@ async function copyBillImage(bill) {
   }
   copyingId.value = bill.id
   try {
-    const item = new ClipboardItem({
-      'image/png': billApi.downloadImage(bill.id).then((raw) => {
-        const b = raw instanceof Blob ? raw : new Blob([raw], { type: 'image/png' })
-        return b.type === 'image/png' ? b : new Blob([b], { type: 'image/png' })
-      }),
-    })
-    await navigator.clipboard.write([item])
+    const el = await receiptElFor(bill)
+    if (!el) throw new Error('小票渲染失败')
+    const blob = await captureBlob(el)
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
     ElMessage.success('图片已复制，去聊天窗口 Ctrl+V 直接发')
   } catch (e) {
     ElMessage.error('复制失败：' + (e.message || '浏览器拒绝了剪贴板操作'))
   } finally {
     copyingId.value = null
+    offscreenBill.value = null
   }
 }
 
@@ -641,6 +690,15 @@ onMounted(() => {
 .pv-calc { color: #666; white-space: nowrap; }
 
 /* 小票弹窗 */
-.img-wrap { text-align: center; max-height: 70vh; overflow-y: auto; }
-.bill-img { max-width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,0.12); border-radius: 4px; }
+.img-wrap { display: flex; justify-content: center; max-height: 70vh; overflow-y: auto; }
+.receipt-holder { box-shadow: 0 2px 12px rgba(0,0,0,0.12); border-radius: 4px; }
+
+/* 离屏渲染容器：移出可视区但保留真实布局，供 html2canvas 截图 */
+.offscreen-receipt {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  pointer-events: none;
+  opacity: 0;
+}
 </style>
