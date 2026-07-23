@@ -1,4 +1,4 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 import OrderEntry  from '../views/OrderEntry.vue'
 import PrintQueue  from '../views/PrintQueue.vue'
 import Bills       from '../views/Bills.vue'
@@ -16,6 +16,6 @@ const routes = [
 ]
 
 export default createRouter({
-  history: createWebHashHistory(),
+  history: createWebHistory(),
   routes,
 })
