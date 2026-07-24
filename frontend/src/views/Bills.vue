@@ -45,6 +45,7 @@
       <!-- 汇总条 -->
       <div v-if="bills.length" class="summary-bar">
         <span>共 {{ bills.length }} 张</span>
+        <span class="grand">总金额 ¥{{ grandTotal }}</span>
         <span class="unpaid">未回款 ¥{{ unpaidTotal }}（{{ unpaidCount }} 张）</span>
       </div>
 
@@ -235,9 +236,12 @@ const unpaidCount = computed(() => bills.value.filter((b) => !b.paid).length)
 const unpaidTotal = computed(() =>
   money(bills.value.filter((b) => !b.paid).reduce((s, b) => s + Number(b.total_amount || 0), 0))
 )
+const grandTotal = computed(() =>
+  money(bills.value.reduce((s, b) => s + Number(b.total_amount || 0), 0))
+)
 
 function money(v) {
-  return String(Math.round(Number(v || 0)))
+  return Number(v || 0).toFixed(2)
 }
 function fmtQty(v) {
   const f = Number(v || 0)
@@ -573,6 +577,7 @@ onMounted(() => {
   font-size: 13px;
   color: #606266;
 }
+.summary-bar .grand  { color: #303133; font-weight: 700; }
 .summary-bar .unpaid { color: var(--el-color-danger); font-weight: 700; }
 
 /* 账单卡片 */

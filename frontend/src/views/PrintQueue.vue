@@ -227,9 +227,10 @@ const batchFailed    = ref(0)
 const batchStatus    = ref(new Map())
 let _eventSource     = null         // 当前 SSE 连接，组件卸载/新批次时关掉
 
-// 可打印订单数（一键打印目标：列表里全部订单，无论是否已打印，
-// 支持重复打印当天/历史所有单据）
-const printableCount = computed(() => orders.value.length)
+// 可打印订单数（一键打印目标：列表里未打印的订单，已打印的不再重复打印）
+const printableCount = computed(() =>
+  orders.value.filter((o) => o.status !== 'printed').length
+)
 
 const batchPercent = computed(() =>
   batchTotal.value ? Math.round((batchProcessed.value / batchTotal.value) * 100) : 0
@@ -259,13 +260,13 @@ function orderTagText(order) {
 const editTotal = computed(() =>
   editItems.value
     .reduce((s, i) => s + (i.is_replacement ? 0 : i.qty * i.price), 0)
-    .toFixed(0)
+    .toFixed(2)
 )
 
 function orderTotal(order) {
-  return Math.round(
-    order.items.reduce((s, i) => s + (i.is_replacement ? 0 : Number(i.qty) * Number(i.price)), 0)
-  )
+  return order.items
+    .reduce((s, i) => s + (i.is_replacement ? 0 : Number(i.qty) * Number(i.price)), 0)
+    .toFixed(2)
 }
 
 // 明细倒序展示：库里按录入顺序（早→晚）存，展示时翻转让最新录入排在最上。
@@ -440,18 +441,16 @@ function closeStream() {
   }
 }
 
-// 一键打印：把当前列表里的全部订单按顺序提交（含已打印，支持重打），
+// 一键打印：把当前列表里「未打印」的订单按顺序提交（已打印的跳过，不重复打印），
 // 后台串行打印，SSE 实时更新进度。
 async function handleBatchPrint() {
-  const targets = orders.value.slice()   // 列表全部订单，保持展示顺序
+  // 只打未打印的订单，保持展示顺序；已打印的略过
+  const targets = orders.value.filter((o) => o.status !== 'printed')
   if (targets.length === 0) {
-    ElMessage.info('列表里没有订单')
+    ElMessage.info('列表里没有未打印的订单')
     return
   }
-  const reprintCount = targets.filter((o) => o.status === 'printed').length
-  const tip = reprintCount
-    ? `将按顺序打印 ${targets.length} 张订单（含 ${reprintCount} 张已打印，将重新打印），打印过程中请勿关闭页面。`
-    : `将按顺序打印 ${targets.length} 张订单，打印过程中请勿关闭页面。`
+  const tip = `将按顺序打印 ${targets.length} 张未打印订单，打印过程中请勿关闭页面。`
   try {
     await ElMessageBox.confirm(tip, '一键打印',
       { type: 'info', confirmButtonText: '开始打印', cancelButtonText: '取消' }

@@ -59,7 +59,7 @@ const props = defineProps({
 const WEEK = ['日', '一', '二', '三', '四', '五', '六']
 
 function money(v) {
-  return String(Math.round(Number(v || 0)))
+  return Number(v || 0).toFixed(2)
 }
 function fmtQty(v) {
   const f = Number(v || 0)

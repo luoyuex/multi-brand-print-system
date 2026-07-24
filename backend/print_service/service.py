@@ -19,7 +19,7 @@ def build_print_data(order) -> dict:
     单打路由与一键批量打印共用，保证两条路径打出的凭证格式完全一致。
 
     - 单价/小计保留两位小数（模板里再格式化）；
-    - 合计取整（与前端页面显示一致）；
+    - 合计保留两位小数（与前端页面显示一致）；
     - 数量为整数时去掉小数尾巴，显示更干净；
     - 补货行免费补发：单价/小计强制为 0，不计入合计。
     """
@@ -55,7 +55,7 @@ def build_print_data(order) -> dict:
         "order_id": order.id,
         "created_at": created_str,
         "items": items,
-        "total": round(total),
+        "total": round(total, 2),
     }
 
 

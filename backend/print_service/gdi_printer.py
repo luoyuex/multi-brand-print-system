@@ -279,4 +279,4 @@ def _draw_page(dc, data: dict) -> None:
     # 总计
     use_font(_SZ_TOTAL)
     cell("总计", col_x[0], col_x[4], row_y(R_TOTAL), align="r")
-    cell(f"¥{data.get('total', 0)}", col_x[4], right, row_y(R_TOTAL))
+    cell(f"¥{float(data.get('total', 0)):.2f}", col_x[4], right, row_y(R_TOTAL))
