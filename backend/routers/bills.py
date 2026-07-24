@@ -52,6 +52,19 @@ def preview_bill(data: schemas.BillPreviewIn, db: Session = Depends(get_db)):
                              include_bill_id=data.bill_id)
 
 
+@router.post("/summary", response_model=schemas.BillPreviewOut)
+def summary_bill(data: schemas.BillPreviewIn, db: Session = Depends(get_db)):
+    """回款对账汇总（只读）：把某客户账期内**所有**订单（无视是否已出账）按天汇总。
+
+    专供要回款时拉一张多天总账发客户，不落库、不认领订单，与日常出账流程解耦。
+    """
+    if not crud.get_store(db, data.store_id):
+        raise HTTPException(status_code=404, detail="店铺不存在")
+    if data.end < data.start:
+        raise HTTPException(status_code=400, detail="结束日期不能早于起始日期")
+    return crud.summary_bill(db, data.store_id, data.start, data.end)
+
+
 @router.post("/", response_model=schemas.BillOut, status_code=201)
 def create_bill(data: schemas.BillCreate, db: Session = Depends(get_db)):
     if not crud.get_store(db, data.store_id):

@@ -168,7 +168,7 @@
                   <span class="suggest-meta">{{ item.spec }} ¥{{ item.price }}</span>
                 </template>
               </el-autocomplete>
-              <el-input-number v-model="addQty" :min="0.01" :precision="2" size="small" style="width:110px;" />
+              <el-input-number v-model="addQty" :min="0.01" :precision="2" placeholder="数量" size="small" style="width:110px;" />
               <el-button size="small" type="primary" plain :disabled="!addSelected" @click="addEditItem(false)">加入</el-button>
               <el-button size="small" type="warning" plain :disabled="!addSelected" @click="addEditItem(true)">补货</el-button>
             </div>
@@ -210,7 +210,7 @@ const deletingId  = ref(null)
 const editBrandId   = ref(null)   // 当前编辑订单所属品牌（商品搜索按品牌过滤）
 const addKeyword    = ref('')     // 搜索框文字
 const addSelected   = ref(null)   // 选中的商品
-const addQty        = ref(1)      // 新增数量
+const addQty        = ref(null)   // 新增数量（无默认值，与录单页一致）
 
 // ── 打印机状态 ──
 const printerReady      = ref(true)
@@ -323,7 +323,7 @@ function toggleEdit(order) {
 function resetAddInputs() {
   addKeyword.value = ''
   addSelected.value = null
-  addQty.value = 1
+  addQty.value = null
 }
 
 // 编辑时按订单所属品牌搜索商品（序号 / 品名），供 el-autocomplete 提示

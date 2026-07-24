@@ -267,7 +267,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import { useBrandStore } from '../stores/brand'
 import { useOrderStore } from '../stores/order'
@@ -365,6 +365,15 @@ function addAsReplacement() {
 async function submitOrder() {
   if (!orderStore.storeId) { ElMessage.warning('请选择店铺'); return }
   if (orderStore.items.length === 0) { ElMessage.warning('订单为空'); return }
+  try {
+    await ElMessageBox.confirm(
+      `确定提交该订单？共 ${orderStore.items.length} 项商品。`,
+      '提交订单',
+      { type: 'info', confirmButtonText: '提交', cancelButtonText: '取消' }
+    )
+  } catch {
+    return   // 用户取消
+  }
   submitting.value = true
   try {
     await orderApi.create({

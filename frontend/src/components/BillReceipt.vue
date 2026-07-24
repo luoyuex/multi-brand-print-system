@@ -9,7 +9,7 @@
     <div class="meta">
       <div class="row"><span class="label">客户</span><span class="val">{{ bill.customer }}</span></div>
       <div class="row"><span class="label">账期</span><span class="val">{{ periodText }}</span></div>
-      <div class="row"><span class="label">单号</span><span class="val">#{{ bill.id }}　共 {{ bill.order_count }} 单</span></div>
+      <div class="row"><span class="label">单号</span><span class="val"><template v-if="bill.id">#{{ bill.id }}　</template>共 {{ bill.order_count }} 单</span></div>
     </div>
 
     <hr class="divider" />

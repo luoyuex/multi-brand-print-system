@@ -100,6 +100,8 @@ export const billApi = {
   get:           (id)        => http.get(`/bills/${id}`),
   // 预览某客户某账期未出账汇总（不落库）
   preview:       (data)      => http.post('/bills/preview', data),
+  // 回款对账汇总：某客户某账期内所有订单（无视是否已出账）按天汇总，只读不落库
+  summary:       (data)      => http.post('/bills/summary', data),
   // 生成账单（认领未出账订单）
   create:        (data)      => http.post('/bills/', data),
   // 编辑账单：改账期（重算明细）/ 备注

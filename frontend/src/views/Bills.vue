@@ -34,6 +34,7 @@
               <el-option label="未回款" value="false" />
             </el-select>
             <el-button size="small" :loading="loading" @click="loadBills">刷新</el-button>
+            <el-button size="small" type="warning" plain @click="openSummary">📊 回款对账</el-button>
             <el-button size="small" type="primary" @click="openGenerate">＋ 生成账单</el-button>
             <el-button size="small" type="success" :loading="genTodayLoading" @click="handleGenerateToday">
               一键生成今日
@@ -161,6 +162,71 @@
       </template>
     </el-dialog>
 
+    <!-- 回款对账汇总弹窗：选客户+多天区间，拉该客户区间内所有订单（无视是否已出账）
+         汇成一张只读总账，可直接下载/复制图片发客户。不落库、不动任何数据。 -->
+    <el-dialog v-model="sumVisible" title="回款对账（多天汇总）" width="560px">
+      <div class="gen-form">
+        <div class="gen-row">
+          <span class="gen-label">客户</span>
+          <el-select v-model="sumStoreId" placeholder="选择客户（店铺）" filterable style="flex:1;" @change="doSummary">
+            <el-option v-for="s in stores" :key="s.id" :value="s.id" :label="s.name">
+              <span>{{ s.name }}</span>
+              <span v-if="s.contact" style="float:right;color:#999;font-size:12px;">{{ s.contact }}</span>
+            </el-option>
+          </el-select>
+        </div>
+        <div class="gen-tip">汇总该客户账期内的全部订单（含已出账），仅用于查看/发送，不影响原有账单。</div>
+        <div class="gen-row">
+          <span class="gen-label">账期</span>
+          <el-date-picker v-model="sumStart" type="date" placeholder="起" value-format="YYYY-MM-DD" style="flex:1;min-width:0;" @change="doSummary" />
+          <span class="date-sep">至</span>
+          <el-date-picker v-model="sumEnd" type="date" placeholder="止" value-format="YYYY-MM-DD" style="flex:1;min-width:0;" @change="doSummary" />
+        </div>
+
+        <div class="preview-panel" v-loading="sumLoading">
+          <template v-if="summary && summary.order_count > 0">
+            <div class="preview-head">
+              <span>{{ summary.customer }}</span>
+              <span class="preview-total">{{ summary.order_count }} 单 · 合计 ¥{{ money(summary.total) }}</span>
+            </div>
+            <div v-for="day in summary.days" :key="day.date" class="pv-day">
+              <div class="pv-day-title">{{ day.date }}（¥{{ money(day.subtotal) }}）</div>
+              <div v-for="(it, i) in day.items" :key="i" class="pv-line">
+                <span class="pv-name">{{ it.product_name }} <span class="pv-spec">{{ it.spec }}</span></span>
+                <span class="pv-calc">
+                  <template v-if="it.is_replacement">补发</template>
+                  <template v-else>{{ fmtQty(it.qty) }} × {{ money(it.price) }} = ¥{{ money(it.subtotal) }}</template>
+                </span>
+              </div>
+            </div>
+          </template>
+          <el-empty v-else :image-size="60" description="该客户在所选账期内没有订单" />
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="sumVisible = false">关闭</el-button>
+        <el-button
+          type="success"
+          :loading="sumCopying"
+          :disabled="!summary || summary.order_count === 0"
+          @click="copySummaryImage"
+        >📋 复制图片</el-button>
+        <el-button
+          type="primary"
+          :loading="sumDownloading"
+          :disabled="!summary || summary.order_count === 0"
+          @click="downloadSummaryImage"
+        >下载图片</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 汇总小票离屏渲染容器：供 html2canvas 截图（汇总弹窗内不直接展示小票，避免过高） -->
+    <div class="offscreen-receipt" aria-hidden="true">
+      <div v-if="summaryBill" ref="summaryRef">
+        <BillReceipt :bill="summaryBill" />
+      </div>
+    </div>
+
     <!-- 小票预览弹窗：前端用 BillReceipt 组件渲染，html2canvas 截图成 PNG -->
     <el-dialog v-model="imgVisible" title="账单小票" width="480px" class="img-dialog">
       <div class="img-wrap">
@@ -222,6 +288,18 @@ const genNote        = ref('')
 const preview        = ref(null)
 const previewLoading = ref(false)
 const creating       = ref(false)
+
+// ── 回款对账（多天汇总）弹窗：只读，不落库 ──
+const sumVisible    = ref(false)
+const sumStoreId    = ref(null)
+const sumStart      = ref('')
+const sumEnd        = ref('')
+const summary       = ref(null)   // 后端汇总结果（days + total），形状同 preview
+const sumLoading    = ref(false)
+const summaryBill   = ref(null)   // 拼给 BillReceipt 出图的合成 bill（离屏渲染）
+const summaryRef    = ref(null)   // 汇总小票离屏 DOM
+const sumDownloading = ref(false)
+const sumCopying     = ref(false)
 
 // ── 小票弹窗 ──
 const imgVisible   = ref(false)
@@ -391,6 +469,123 @@ async function handleGenerateToday() {
     ElMessage.error(e.message)
   } finally {
     genTodayLoading.value = false
+  }
+}
+
+// ── 回款对账（多天汇总，只读，不落库）──
+function openSummary() {
+  sumStoreId.value = null
+  // 默认账期给本月 1 号到今天，回款对账最常见
+  const d = new Date()
+  sumStart.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+  sumEnd.value = todayStr()
+  summary.value = null
+  sumVisible.value = true
+  ensureStores()
+}
+
+async function doSummary() {
+  summary.value = null
+  if (!sumStoreId.value || !sumStart.value || !sumEnd.value) return
+  if (sumEnd.value < sumStart.value) {
+    ElMessage.warning('结束日期不能早于起始日期')
+    return
+  }
+  sumLoading.value = true
+  try {
+    summary.value = await billApi.summary({
+      store_id: sumStoreId.value,
+      start: sumStart.value,
+      end: sumEnd.value,
+    })
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    sumLoading.value = false
+  }
+}
+
+// 把汇总结果拼成一个「合成账单」对象喂给 BillReceipt（无 id、无 paid，展示为多天总账）。
+// items 需带 order_date，BillReceipt 按天分组；这里把 days 拍平即可。
+function buildSummaryBill() {
+  const s = summary.value
+  if (!s) return null
+  const items = []
+  for (const day of s.days || []) {
+    for (const it of day.items || []) {
+      items.push({ ...it, order_date: day.date })
+    }
+  }
+  return {
+    id: null,
+    customer: s.customer,
+    period_start: s.period_start,
+    period_end: s.period_end,
+    total_amount: s.total,
+    order_count: s.order_count,
+    paid: false,
+    created_at: new Date().toISOString(),
+    items,
+  }
+}
+
+function summaryFileName() {
+  const s = summary.value
+  const period = s.period_start === s.period_end
+    ? s.period_start
+    : `${s.period_start}_${s.period_end}`
+  return `回款对账_${s.customer}_${period}.png`
+}
+
+// 渲染离屏小票并返回其 DOM（等一帧让布局稳定，避免截到未排版好的内容）。
+async function summaryReceiptEl() {
+  summaryBill.value = buildSummaryBill()
+  await nextTick()
+  await new Promise((r) => requestAnimationFrame(() => r()))
+  return summaryRef.value
+}
+
+async function downloadSummaryImage() {
+  if (!summary.value || summary.value.order_count === 0) return
+  sumDownloading.value = true
+  try {
+    const el = await summaryReceiptEl()
+    if (!el) throw new Error('小票渲染失败')
+    const blob = await captureBlob(el)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = summaryFileName()
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    sumDownloading.value = false
+    summaryBill.value = null
+  }
+}
+
+async function copySummaryImage() {
+  if (!summary.value || summary.value.order_count === 0) return
+  if (!navigator.clipboard || !window.ClipboardItem) {
+    ElMessage.warning('当前环境不支持复制图片（需 https 或 localhost），请改用下载')
+    return
+  }
+  sumCopying.value = true
+  try {
+    const el = await summaryReceiptEl()
+    if (!el) throw new Error('小票渲染失败')
+    const blob = await captureBlob(el)
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+    ElMessage.success('图片已复制，去聊天窗口 Ctrl+V 直接发')
+  } catch (e) {
+    ElMessage.error('复制失败：' + (e.message || '浏览器拒绝了剪贴板操作'))
+  } finally {
+    sumCopying.value = false
+    summaryBill.value = null
   }
 }
 

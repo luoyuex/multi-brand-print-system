@@ -314,6 +314,63 @@ def preview_bill(db: Session, store_id: int, start: date, end: date,
     }
 
 
+def summary_bill(db: Session, store_id: int, start: date, end: date):
+    """回款对账汇总（只读，不落库、不认领订单）：把某客户账期区间内**尚未回款**的订单
+    按天分组汇总，供月中/月末要回款时拉一张催款总账。
+
+    回款状态记在账单（Bill.paid）上：订单归属的账单若已标回款，则该单视为已收款，
+    整单排除；未出账的散单（bill_id 为空）无回款状态，视为未回款保留。因此汇总额
+    正好是「该客户区间内还没收到的钱」。输出形状与 preview_bill 一致（days + total）。
+    """
+    s, e = _day_range(start, end)
+    # 已回款账单 id 集合：订单归属其中的即视为已收款，从汇总中排除
+    paid_bill_ids = db.query(models.Bill.id).filter(models.Bill.paid.is_(True))
+    orders = (
+        _order_q(db)
+        .filter(
+            models.Order.store_id == store_id,
+            models.Order.created_at >= s,
+            models.Order.created_at < e,
+            or_(
+                models.Order.bill_id.is_(None),
+                models.Order.bill_id.notin_(paid_bill_ids),
+            ),
+        )
+        .order_by(models.Order.created_at.asc())
+        .all()
+    )
+    store = get_store(db, store_id)
+    customer = store.name if store else (orders[0].customer if orders else "")
+    brand_name = orders[0].brand_name if orders else ""
+
+    days = {}   # date -> {date, items, subtotal}；orders 已按时间升序，天然按天有序
+    total = 0.0
+    for order, it, qty, price, subtotal in _iter_bill_lines(orders):
+        d = order.created_at.date()
+        day = days.setdefault(d, {"date": d, "items": [], "subtotal": 0.0})
+        day["items"].append({
+            "product_name": it.product_name,
+            "spec": it.spec or "",
+            "qty": qty,
+            "price": price,
+            "subtotal": subtotal,
+            "is_replacement": bool(it.is_replacement),
+        })
+        day["subtotal"] += subtotal
+        total += subtotal
+
+    return {
+        "store_id": store_id,
+        "customer": customer,
+        "brand_name": brand_name,
+        "period_start": start,
+        "period_end": end,
+        "order_count": len(orders),
+        "total": total,
+        "days": list(days.values()),
+    }
+
+
 def create_bill(db: Session, store_id: int, start: date, end: date, note: str = None):
     """出账：把该客户区间内未出账订单快照成一张账单。
 
