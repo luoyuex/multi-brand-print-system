@@ -5,11 +5,12 @@ import sys, asyncio
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
-from database import engine, Base
-from routers import brands, products, orders, stores, print as print_router, bills
+from database import engine, Base, SessionLocal
+from routers import brands, products, orders, stores, print as print_router, bills, auth as auth_router
+import auth
 
 # 建表（首次启动自动建表）
 Base.metadata.create_all(bind=engine)
@@ -51,6 +52,27 @@ def _run_migrations():
 
 _run_migrations()
 
+
+def _seed_admin():
+    """首次启动无账号时，创建默认管理员 admin/admin123（请登录后尽快改密）。"""
+    import models
+    db = SessionLocal()
+    try:
+        if db.query(models.User).count() == 0:
+            db.add(models.User(
+                username="admin",
+                password_hash=auth.hash_password("admin123"),
+                name="管理员",
+                role="admin",
+                is_active=True,
+            ))
+            db.commit()
+            print("[seed] 已创建默认管理员 admin / admin123，请登录后尽快修改密码")
+    finally:
+        db.close()
+
+_seed_admin()
+
 app = FastAPI(title="多品牌录单系统", version="1.0.0")
 
 # 跨域（开发阶段允许所有来源）
@@ -62,12 +84,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(brands.router)
-app.include_router(stores.router)
-app.include_router(products.router)
-app.include_router(orders.router)
-app.include_router(print_router.router)
-app.include_router(bills.router)
+app.include_router(auth_router.router)
+# 登录即可访问：录单 / 打印需要读品牌·店铺·商品·订单，写操作在各路由内单独校验管理员
+_login = [Depends(auth.get_current_user)]
+_admin = [Depends(auth.require_admin)]
+app.include_router(brands.router, dependencies=_login)
+app.include_router(stores.router, dependencies=_login)
+app.include_router(products.router, dependencies=_login)
+app.include_router(orders.router, dependencies=_login)
+app.include_router(print_router.router, dependencies=_login)
+app.include_router(bills.router, dependencies=_admin)   # 账单仅管理员
 
 
 @app.on_event("shutdown")

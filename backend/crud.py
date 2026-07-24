@@ -3,6 +3,56 @@ from datetime import datetime, date, timedelta
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 import models, schemas
+import auth
+
+
+# ── User（账号）─────────────────────────────────────────
+def get_users(db: Session):
+    return db.query(models.User).order_by(models.User.id).all()
+
+def get_user(db: Session, user_id: int):
+    return db.query(models.User).filter(models.User.id == user_id).first()
+
+def get_user_by_username(db: Session, username: str):
+    return db.query(models.User).filter(models.User.username == username).first()
+
+def create_user(db: Session, user: schemas.UserCreate):
+    obj = models.User(
+        username=user.username,
+        password_hash=auth.hash_password(user.password),
+        name=user.name,
+        role=user.role,
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+def update_user(db: Session, user_id: int, data: schemas.UserUpdate):
+    obj = get_user(db, user_id)
+    if not obj:
+        return None
+    payload = data.model_dump(exclude_unset=True)
+    if "password" in payload:
+        pw = payload.pop("password")
+        if pw:
+            obj.password_hash = auth.hash_password(pw)
+    for field, value in payload.items():
+        setattr(obj, field, value)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+def delete_user(db: Session, user_id: int):
+    obj = get_user(db, user_id)
+    if obj:
+        db.delete(obj)
+        db.commit()
+    return obj
+
+def change_password(db: Session, user: models.User, new_password: str):
+    user.password_hash = auth.hash_password(new_password)
+    db.commit()
 
 
 # ── Brand ──────────────────────────────────────────────

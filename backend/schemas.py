@@ -3,6 +3,41 @@ from typing import List, Optional
 from datetime import datetime, date
 
 
+# ── User（账号）─────────────────────────────────────────
+class UserBase(BaseModel):
+    username: str
+    name: Optional[str] = None
+    role: str = "staff"          # admin | staff
+
+class UserCreate(UserBase):
+    password: str
+
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+    password: Optional[str] = None   # 传入则重置密码
+
+class UserOut(UserBase):
+    id: int
+    is_active: bool
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+class LoginOut(BaseModel):
+    token: str
+    user: UserOut
+
+class ChangePasswordIn(BaseModel):
+    old_password: str
+    new_password: str
+
+
 # ── Brand ──────────────────────────────────────────────
 class BrandBase(BaseModel):
     name: str

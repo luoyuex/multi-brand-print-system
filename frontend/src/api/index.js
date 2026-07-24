@@ -1,19 +1,55 @@
 import axios from 'axios'
 
+const TOKEN_KEY = 'auth_token'
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY)
+}
+export function setToken(token) {
+  if (token) localStorage.setItem(TOKEN_KEY, token)
+  else localStorage.removeItem(TOKEN_KEY)
+}
+
 const http = axios.create({
   baseURL: '/api',
   timeout: 10000,
+})
+
+// 请求拦截：带上登录令牌
+http.interceptors.request.use((config) => {
+  const token = getToken()
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
 })
 
 // 响应拦截：统一错误提示（组件里按需 import ElMessage）
 http.interceptors.response.use(
   (res) => res.data,
   (err) => {
+    const status = err.response?.status
     const msg = err.response?.data?.detail || '请求失败'
+    // 401：登录失效，清 token 并跳登录（登录接口自身的 401 不跳，由页面提示）
+    if (status === 401 && !err.config?.url?.includes('/auth/login')) {
+      setToken(null)
+      if (location.pathname !== '/login') {
+        location.href = '/login'
+      }
+    }
     console.error('[API Error]', msg)
     return Promise.reject(new Error(msg))
   }
 )
+
+export const authApi = {
+  login:          (data) => http.post('/auth/login', data),
+  me:             ()     => http.get('/auth/me'),
+  changePassword: (data) => http.post('/auth/change-password', data),
+  // 账号管理（仅管理员）
+  listUsers:      ()          => http.get('/auth/users'),
+  createUser:     (data)      => http.post('/auth/users', data),
+  updateUser:     (id, data)  => http.put(`/auth/users/${id}`, data),
+  removeUser:     (id)        => http.delete(`/auth/users/${id}`),
+}
 
 export const brandApi = {
   list: () => http.get('/brands/'),
