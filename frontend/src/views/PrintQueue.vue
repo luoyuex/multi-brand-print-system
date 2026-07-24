@@ -110,7 +110,7 @@
                 <tr><th>品名</th><th>规格</th><th>数量</th><th>单价</th><th>小计</th></tr>
               </thead>
               <tbody>
-                <tr v-for="item in order.items" :key="item.id">
+                <tr v-for="item in displayItems(order)" :key="item.id">
                   <td>
                     {{ item.product_name }}
                     <el-tag v-if="item.is_replacement" type="warning" size="small" effect="dark" class="rep-tag">补</el-tag>
@@ -268,6 +268,11 @@ function orderTotal(order) {
   )
 }
 
+// 明细倒序展示：库里按录入顺序（早→晚）存，展示时翻转让最新录入排在最上。
+function displayItems(order) {
+  return order.items.slice().reverse()
+}
+
 function formatDate(dt) {
   if (!dt) return ''
   const d = new Date(dt)
@@ -306,7 +311,8 @@ function toggleEdit(order) {
     return
   }
   editingId.value = order.id
-  editItems.value = order.items.map((i) => ({ ...i }))
+  // 编辑时也倒序展示（最新录入在最上），与查看模式一致；保存时再翻回录入顺序存库。
+  editItems.value = order.items.map((i) => ({ ...i })).reverse()
   editBrandId.value = order.brand_id
   resetAddInputs()
   // 确保展开
@@ -344,12 +350,13 @@ async function handleAddEnter() {
   }
 }
 
-// 把选中的商品加入编辑明细；补货行单价置 0（与录入页规则一致），加到列表末尾
+// 把选中的商品加入编辑明细；补货行单价置 0（与录入页规则一致）。
+// 展示为倒序（最新在最上），故新增插到列表顶部。
 function addEditItem(asReplacement = false) {
   if (!addSelected.value) { ElMessage.warning('请先选择商品'); return }
   if (!addQty.value || addQty.value <= 0) { ElMessage.warning('请输入有效数量'); return }
   const p = addSelected.value
-  editItems.value.push({
+  editItems.value.unshift({
     product_code: p.code,
     product_name: p.name,
     spec: p.spec || '',
@@ -368,7 +375,9 @@ async function saveEdit(orderId) {
   }
   saving.value = true
   try {
-    const updated = await orderApi.update(orderId, { items: editItems.value })
+    // 编辑区是倒序展示，存库前翻回录入顺序（早→晚），保持库内始终按录入序存。
+    const payload = editItems.value.slice().reverse()
+    const updated = await orderApi.update(orderId, { items: payload })
     const idx = orders.value.findIndex((o) => o.id === orderId)
     if (idx !== -1) orders.value[idx] = updated
     editingId.value = null

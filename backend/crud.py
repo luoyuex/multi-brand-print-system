@@ -175,7 +175,8 @@ def _iter_bill_lines(orders):
     补货行单价/小计强制为 0、不计入合计。逐条 yield (order, item, qty, price, subtotal)。
     """
     for order in orders:
-        for it in order.items:
+        # 每单内商品倒序：先录入的排在后面（与打印列表/小票口径一致）。
+        for it in reversed(order.items):
             is_rep = bool(it.is_replacement)
             qty = float(it.qty)
             price = 0.0 if is_rep else float(it.price)

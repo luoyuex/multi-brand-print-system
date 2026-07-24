@@ -60,7 +60,10 @@ class Order(Base):
 
     brand = relationship("Brand", back_populates="orders")
     store = relationship("Store", back_populates="orders")
-    items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
+    # order_by=id 保证明细按录入顺序（id 自增）稳定加载；否则 MySQL + joinedload
+    # 返回顺序不定，展示/打印会「随机」乱序。倒序展示在取用处再 reversed()。
+    items = relationship("OrderItem", back_populates="order",
+                         order_by="OrderItem.id", cascade="all, delete-orphan")
 
     @property
     def brand_name(self):
@@ -107,7 +110,11 @@ class Bill(Base):
     note          = Column(String(255), nullable=True)
     created_at    = Column(DateTime, server_default=func.now())
 
-    items = relationship("BillItem", back_populates="bill", cascade="all, delete-orphan")
+    # 按 id 升序：id 自增，还原出账时的写入顺序（订单按天有序、每单内倒序），
+    # 否则 MySQL 返回行序不保证，展示/小票顺序会看起来「随机」。
+    items = relationship("BillItem", back_populates="bill",
+                         cascade="all, delete-orphan",
+                         order_by="BillItem.id")
 
 
 class BillItem(Base):

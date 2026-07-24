@@ -27,9 +27,10 @@ def build_print_data(order) -> dict:
         f = float(q)
         return int(f) if f == int(f) else round(f, 2)
 
+    # 小票上商品倒序展示：先录入的排在后面（最新录入在最上）。
     items = []
     total = 0.0
-    for i, it in enumerate(order.items, start=1):
+    for i, it in enumerate(reversed(order.items), start=1):
         is_replacement = bool(it.is_replacement)
         qty = float(it.qty)
         price = 0.0 if is_replacement else float(it.price)

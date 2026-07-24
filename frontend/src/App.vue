@@ -7,7 +7,10 @@
       class="app-header"
     >
       <div class="header-inner">
-        <span class="header-logo">🧾 多品牌录单系统</span>
+        <span class="header-logo">
+          <img :src="logoUrl" class="logo-img" alt="" />
+          多品牌录单系统
+        </span>
         <!-- 桌面水平菜单 -->
         <el-menu
           v-if="!isMobile"
@@ -51,6 +54,7 @@
 
 <script setup>
 import { useBreakpoint } from './composables/useBreakpoint'
+import logoUrl from './status/logo.jpg'
 // 导航图标（src/status，按导航顺序 1~6）
 import icon1 from './status/1.png'
 import icon2 from './status/2.png'
@@ -89,11 +93,21 @@ const navItems = [
   padding: 0 20px;
 }
 .header-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: #fff;
   font-size: 17px;
   font-weight: 700;
   letter-spacing: 0.5px;
   white-space: nowrap;
+}
+.logo-img {
+  height: 30px;
+  width: auto;
+  border-radius: 6px;
+  object-fit: contain;
+  display: block;
 }
 .desktop-menu {
   margin-left: 32px;
